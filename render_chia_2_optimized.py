@@ -4,8 +4,6 @@ from glob import glob
 import random
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import tempfile
-import shutil
-from pathlib import Path
 
 def run_ffmpeg(cmd, silent=False):
     if not silent:
@@ -67,7 +65,7 @@ def render_single_optimized(main_video, bg_video, index):
             "-filter_complex", "[0:v]setpts=PTS/1.3[v];[0:a]atempo=1.3[a]",
             "-map", "[v]", "-map", "[a]", 
             "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "aac", "-threads", "0",  # Sử dụng tất cả CPU cores
+            "-c:a", "aac", "-threads", "0",
             temp_main
         ], silent=True)
         
@@ -86,10 +84,10 @@ def render_single_optimized(main_video, bg_video, index):
             "-map", "[v]", "-map", "0:a",
             "-c:v", "libx264",
             "-preset", "ultrafast",
-            "-crf", "23",  # Chất lượng tốt hơn với file size hợp lý
+            "-crf", "23",
             "-c:a", "aac",
             "-shortest",
-            "-threads", "0",  # Sử dụng tất cả CPU cores
+            "-threads", "0",
             output_file
         ])
 

@@ -5,7 +5,6 @@ import random
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import tempfile
 import json
-from pathlib import Path
 
 def check_gpu_support():
     """Kiểm tra GPU support cho encoding"""
