@@ -78,7 +78,42 @@ def create_gif_loop_png(gif_path, target_duration, temp_dir):
     
     return png_pattern
 
-def render_single_optimized(main_video, bg_video, index, add_effects=True):
+def create_gif_tiled_overlay(gif_path, target_duration, temp_dir, video_width=1080, video_height=1080):
+    """Tạo GIF tiled để lấp đầy màn hình thay vì scale"""
+    gif_duration = get_video_duration(gif_path)
+    
+    # Tính toán số lượng tile cần thiết
+    # GIF có kích thước 480x240, video 1080x1080
+    tiles_x = max(1, (video_width + 479) // 480)  # Làm tròn lên
+    tiles_y = max(1, (video_height + 239) // 240)  # Làm tròn lên
+    
+    # Tạo tiled overlay trực tiếp từ GIF
+    tiled_pattern = os.path.join(temp_dir, "gif_tiled_%04d.png")
+    run_ffmpeg([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
+        "-t", str(target_duration),
+        "-vf", f"fps=10,tile={tiles_x}x{tiles_y}",  # Chỉ tile, không mirror
+        tiled_pattern
+    ], silent=True)
+    
+    return tiled_pattern
+
+def create_gif_center_overlay(gif_path, target_duration, temp_dir):
+    """Tạo GIF ở giữa màn hình không scale"""
+    gif_duration = get_video_duration(gif_path)
+    
+    # Tạo PNG sequence từ GIF giữ nguyên kích thước
+    png_pattern = os.path.join(temp_dir, "gif_center_%04d.png")
+    run_ffmpeg([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
+        "-t", str(target_duration),
+        "-vf", "fps=10",  # Giữ frame rate phù hợp
+        png_pattern
+    ], silent=True)
+    
+    return png_pattern
+
+def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_mode="tile"):
     video_name = os.path.splitext(os.path.basename(main_video))[0]
     output_file = f"output/{video_name}.mp4"
 
@@ -109,22 +144,21 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True):
         
         # Bước 3: Render cuối cùng với optional effects
         if add_effects and os.path.exists("effects/star.gif"):
-            # Tạo GIF loop với thời lượng bằng video
-            temp_gif_loop = create_gif_loop("effects/star.gif", main_duration, temp_dir)
-            
-            # Thử phương pháp 1: MP4 với yuva420p
-            try:
+            if gif_mode == "tile":
+                # Sử dụng tiled/mirrored effect
+                print("🔄 Sử dụng tiled/mirrored GIF overlay...")
+                gif_pattern = create_gif_tiled_overlay("effects/star.gif", main_duration, temp_dir)
+                
                 run_ffmpeg([
                     "ffmpeg", "-y",
                     "-i", temp_main,
                     "-i", temp_bg_loop,
-                    "-i", temp_gif_loop,
+                    "-framerate", "10", "-i", gif_pattern,
                     "-filter_complex",
                     "[0:v]scale=540:1080[left]; "
                     "[1:v]scale=540:1080[right]; "
                     "[left][right]hstack=inputs=2[stacked]; "
-                    "[2:v]scale=1080:1080:flags=lanczos[gif_scaled]; "
-                    "[stacked][gif_scaled]overlay=0:0:format=yuva420p[v]",
+                    "[stacked][2:v]overlay=0:0[v]",
                     "-map", "[v]", "-map", "0:a",
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
@@ -134,9 +168,32 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True):
                     "-threads", "0",
                     output_file
                 ])
-            except:
-                # Nếu không thành công, thử phương pháp 2: PNG sequence
-                print("🔄 Thử phương pháp PNG sequence cho alpha channel...")
+            elif gif_mode == "center":
+                # Sử dụng GIF ở giữa màn hình
+                print("✨ Sử dụng GIF ở giữa màn hình...")
+                png_pattern = create_gif_center_overlay("effects/star.gif", main_duration, temp_dir)
+                
+                run_ffmpeg([
+                    "ffmpeg", "-y",
+                    "-i", temp_main,
+                    "-i", temp_bg_loop,
+                    "-framerate", "10", "-i", png_pattern,
+                    "-filter_complex",
+                    "[0:v]scale=540:1080[left]; "
+                    "[1:v]scale=540:1080[right]; "
+                    "[left][right]hstack=inputs=2[stacked]; "
+                    "[stacked][2:v]overlay=0:0[v]",
+                    "-map", "[v]", "-map", "0:a",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-shortest",
+                    "-threads", "0",
+                    output_file
+                ])
+            else: # Sử dụng scale mode (như cũ)
+                print("✨ Sử dụng scaled GIF overlay...")
                 png_pattern = create_gif_loop_png("effects/star.gif", main_duration, temp_dir)
                 
                 run_ffmpeg([
@@ -186,7 +243,7 @@ def preprocess_backgrounds(background_videos):
         get_video_duration(bg_video)
     print(f"✅ Đã cache {len(background_videos)} background videos")
 
-def render_all_optimized(add_effects=True):
+def render_all_optimized(add_effects=True, gif_mode="tile"):
     os.makedirs("output", exist_ok=True)
     download_videos = sorted(glob("dongphuc/*.mp4"))
     background_videos = sorted(glob("video_chia_2/*.mp4"))
@@ -208,7 +265,7 @@ def render_all_optimized(add_effects=True):
         for idx, main_video in enumerate(download_videos):
             bg_video = random.choice(background_videos)
             print(f"📋 Queue: {os.path.basename(main_video)} + {os.path.basename(bg_video)}")
-            future = executor.submit(render_single_optimized, main_video, bg_video, idx, add_effects)
+            future = executor.submit(render_single_optimized, main_video, bg_video, idx, add_effects, gif_mode)
             futures.append(future)
         
         # Đợi tất cả hoàn thành
@@ -231,5 +288,6 @@ def cleanup_temp_files():
 
 if __name__ == "__main__":
     cleanup_temp_files()
-    # Có thể chọn có effects hay không
-    render_all_optimized(add_effects=True)  # True để thêm star.gif overlay 
+    # Có thể chọn có effects hay không và mode GIF
+    # gif_mode options: "tile" (mirrored/tiled), "center" (center) hoặc "scale" (scaled up)
+    render_all_optimized(add_effects=True, gif_mode="tile")  # True để thêm star.gif overlay 
