@@ -397,63 +397,93 @@ class OpeningEffectProcessor:
     
     def _apply_circle_expand_contract_effect(self, input_video: str, output_video: str,
                                            effect_type: EffectType, duration: float) -> bool:
-        """Apply circle expand or contract effect using simpler approach"""
+        """Apply circle expand or contract effect with proper circle reveal"""
+        try:
+            from circle_effects_processor import CircleEffectsProcessor
+            
+            width, height = self.config.output_size
+            processor = CircleEffectsProcessor(width, height, duration, input_video)
+            
+            if effect_type == EffectType.CIRCLE_EXPAND:
+                effect_type_str = "expand"
+            else:  # CIRCLE_CONTRACT
+                effect_type_str = "shrink"
+            
+            return processor.apply_circle_effect(input_video, output_video, effect_type_str)
+            
+        except ImportError:
+            # Fallback to simple FFmpeg approach if processor not available
+            logger.warning("Circle effects processor not available, using fallback")
+            return self._apply_circle_fallback(input_video, output_video, effect_type, duration)
+    
+    def _apply_circle_rotate_effect(self, input_video: str, output_video: str,
+                                  effect_type: EffectType, duration: float) -> bool:
+        """Apply circle rotate effect with proper circle reveal"""
+        try:
+            from circle_effects_processor import CircleEffectsProcessor
+            
+            width, height = self.config.output_size
+            processor = CircleEffectsProcessor(width, height, duration, input_video)
+            
+            if effect_type == EffectType.CIRCLE_ROTATE_CW:
+                effect_type_str = "rotate_cw"
+            else:  # CIRCLE_ROTATE_CCW
+                effect_type_str = "rotate_ccw"
+            
+            return processor.apply_circle_effect(input_video, output_video, effect_type_str)
+            
+        except ImportError:
+            # Fallback to simple FFmpeg approach if processor not available
+            logger.warning("Circle effects processor not available, using fallback")
+            return self._apply_circle_fallback(input_video, output_video, effect_type, duration)
+    
+    def _apply_circle_fallback(self, input_video: str, output_video: str,
+                              effect_type: EffectType, duration: float) -> bool:
+        """Fallback method for circle effects using simple FFmpeg filters"""
         width, height = self.config.output_size
         center_x, center_y = width // 2, height // 2
         
         if effect_type == EffectType.CIRCLE_EXPAND:
-            # Circle expands from center using scale and crop with expanding area
+            # Simple expanding circle using crop
             filter_expr = (
                 f"scale={width}:{height},"
                 f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
                 f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
                 f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
-                f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})'"
+                f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})',"
+                f"pad=w={width}:h={height}:x=0:y=0:color=black"
             )
-        else:  # CIRCLE_CONTRACT
-            # Circle contracts to center using scale and simple crop approach
+        elif effect_type == EffectType.CIRCLE_CONTRACT:
+            # Simple contracting circle using crop
             filter_expr = (
                 f"scale={width}:{height},"
+                f"pad=w={width}:h={height}:x=0:y=0:color=black,"
                 f"crop=w='if(lt(t,{duration}),{width}-(t/{duration})*{width},{width})':"
                 f"h='if(lt(t,{duration}),{height}-(t/{duration})*{height},{height})':"
                 f"x='if(lt(t,{duration}),(t/{duration})*{center_x},{center_x})':"
                 f"y='if(lt(t,{duration}),(t/{duration})*{center_y},{center_y})'"
             )
-        
-        cmd = [
-            "ffmpeg", "-y", "-i", input_video,
-            "-vf", filter_expr,
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "copy",
-            output_video
-        ]
-        return self._run_ffmpeg(cmd)
-    
-    def _apply_circle_rotate_effect(self, input_video: str, output_video: str,
-                                  effect_type: EffectType, duration: float) -> bool:
-        """Apply circle rotate effect (clockwise or counter-clockwise) using simpler approach"""
-        width, height = self.config.output_size
-        center_x, center_y = width // 2, height // 2
-        
-        if effect_type == EffectType.CIRCLE_ROTATE_CW:
-            # Clockwise rotation with expanding area
+        elif effect_type == EffectType.CIRCLE_ROTATE_CW:
+            # Simple rotating circle using crop and rotate
             filter_expr = (
                 f"scale={width}:{height},"
                 f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
                 f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
                 f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
                 f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})',"
-                f"rotate='if(lt(t,{duration}),(t/{duration})*360,360)':bilinear=0"
+                f"rotate='if(lt(t,{duration}),(t/{duration})*360,360)':bilinear=0,"
+                f"pad=w={width}:h={height}:x=0:y=0:color=black"
             )
         else:  # CIRCLE_ROTATE_CCW
-            # Counter-clockwise rotation with expanding area
+            # Simple rotating circle counter-clockwise
             filter_expr = (
                 f"scale={width}:{height},"
                 f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
                 f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
                 f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
                 f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})',"
-                f"rotate='if(lt(t,{duration}),-(t/{duration})*360,-360)':bilinear=0"
+                f"rotate='if(lt(t,{duration}),-(t/{duration})*360,-360)':bilinear=0,"
+                f"pad=w={width}:h={height}:x=0:y=0:color=black"
             )
         
         cmd = [
@@ -596,7 +626,7 @@ class VideoRenderer:
         if not self.processor.run_ffmpeg(cmd):
             return False
         
-        # Apply opening effect if specified
+        # Apply opening effect to the merged video
         if self.config.OPENING_EFFECT != EffectType.NONE:
             success = self.opening_effect_processor.create_opening_effect(
                 temp_output, output_file, 
@@ -644,7 +674,7 @@ class VideoRenderer:
         if not self.processor.run_ffmpeg(cmd):
             return False
         
-        # Apply opening effect if specified
+        # Apply opening effect to the merged video
         if self.config.OPENING_EFFECT != EffectType.NONE:
             success = self.opening_effect_processor.create_opening_effect(
                 temp_output, output_file, 
