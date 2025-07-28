@@ -91,7 +91,27 @@ def create_gif_tiled_overlay(gif_path, target_duration, temp_dir, video_width=10
     run_ffmpeg([
         "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
         "-t", str(target_duration),
-        "-vf", f"fps=10,scale=480:240,pad={video_width}:{video_height}:0:0:color=0x00000000",  # Scale và pad với alpha=0
+        "-vf", f"fps=10,scale=480:480,pad={video_width}:{video_height}:0:0:color=0x00000000",  # Scale và pad với alpha=0
+        "-frames:v", str(total_frames),  # Chỉ định số frame cần thiết
+        tiled_pattern
+    ], silent=True)
+    
+    return tiled_pattern
+
+def create_gif_full_tiled_overlay(gif_path, target_duration, temp_dir, video_width=1080, video_height=1080):
+    """Tạo GIF tiled để lấp đầy toàn bộ màn hình với nhiều GIF nhỏ hơn"""
+    gif_duration = get_video_duration(gif_path)
+    
+    # Tính số frame cần thiết (10 fps * duration)
+    total_frames = int(target_duration * 10)
+    
+    # Tạo nhiều GIF nhỏ hơn để lấp đầy toàn bộ màn hình
+    # Chia thành 3x3 grid với mỗi GIF 360x360
+    tiled_pattern = os.path.join(temp_dir, "gif_full_tiled_%04d.png")
+    run_ffmpeg([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
+        "-t", str(target_duration),
+        "-vf", f"fps=10,scale=360:360,pad={video_width}:{video_height}:0:0:color=0x00000000",  # Scale và pad với alpha=0
         "-frames:v", str(total_frames),  # Chỉ định số frame cần thiết
         tiled_pattern
     ], silent=True)
@@ -150,6 +170,7 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_m
                 gif_pattern = create_gif_tiled_overlay("effects/star.gif", main_duration, temp_dir)
                 
                 # Tạo tiled effect bằng cách overlay nhiều lần ở các vị trí khác nhau
+                # Video có kích thước 1080x1080, chia thành 2x2 grid với mỗi GIF 480x480
                 run_ffmpeg([
                     "ffmpeg", "-y",
                     "-i", temp_main,
@@ -164,8 +185,49 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_m
                     "[left][right]hstack=inputs=2[stacked]; "
                     "[stacked][2:v]overlay=0:0[tmp1]; "
                     "[tmp1][3:v]overlay=480:0[tmp2]; "
-                    "[tmp2][4:v]overlay=0:240[tmp3]; "
-                    "[tmp3][5:v]overlay=480:240[v]",
+                    "[tmp2][4:v]overlay=0:480[tmp3]; "
+                    "[tmp3][5:v]overlay=480:480[v]",
+                    "-map", "[v]", "-map", "0:a",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-shortest",
+                    "-threads", "0",
+                    output_file
+                ])
+            elif gif_mode == "full_tile":
+                # Sử dụng full tiled effect với nhiều GIF nhỏ hơn
+                print("🔄 Sử dụng full tiled GIF overlay...")
+                gif_pattern = create_gif_full_tiled_overlay("effects/star.gif", main_duration, temp_dir)
+                
+                # Tạo full tiled effect với 3x3 grid (9 GIF)
+                run_ffmpeg([
+                    "ffmpeg", "-y",
+                    "-i", temp_main,
+                    "-i", temp_bg_loop,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-filter_complex",
+                    "[0:v]scale=540:1080[left]; "
+                    "[1:v]scale=540:1080[right]; "
+                    "[left][right]hstack=inputs=2[stacked]; "
+                    "[stacked][2:v]overlay=0:0[tmp1]; "
+                    "[tmp1][3:v]overlay=360:0[tmp2]; "
+                    "[tmp2][4:v]overlay=720:0[tmp3]; "
+                    "[tmp3][5:v]overlay=0:360[tmp4]; "
+                    "[tmp4][6:v]overlay=360:360[tmp5]; "
+                    "[tmp5][7:v]overlay=720:360[tmp6]; "
+                    "[tmp6][8:v]overlay=0:720[tmp7]; "
+                    "[tmp7][9:v]overlay=360:720[tmp8]; "
+                    "[tmp8][10:v]overlay=720:720[v]",
                     "-map", "[v]", "-map", "0:a",
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
@@ -300,5 +362,5 @@ def cleanup_temp_files():
 if __name__ == "__main__":
     cleanup_temp_files()
     # Có thể chọn có effects hay không và mode GIF
-    # gif_mode options: "tile" (mirrored/tiled), "center" (center) hoặc "scale" (scaled up)
-    render_all_optimized(add_effects=True, gif_mode="tile")  # True để thêm star.gif overlay 
+    # gif_mode options: "tile" (2x2 grid), "full_tile" (3x3 grid), "center" (center) hoặc "scale" (scaled up)
+    render_all_optimized(add_effects=True, gif_mode="full_tile")  # True để thêm star.gif overlay 
