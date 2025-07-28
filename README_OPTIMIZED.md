@@ -101,7 +101,8 @@ merger = VideoMerger(FAST_VIDEO_CONFIG)
 | `INPUT_DIR` | "dongphuc" | Input video directory |
 | `BACKGROUND_DIR` | "video_chia_2" | Background video directory |
 | `OUTPUT_DIR` | "output" | Output directory |
-| `EFFECTS_DIR` | "effects" | Effects directory |
+| `EFFECTS_DIR` | "effects" | Original effects directory |
+| `GENERATED_EFFECTS_DIR` | "generated_effects" | Generated effects directory (git-ignored) |
 
 ### FFmpegConfig
 
@@ -118,10 +119,12 @@ merger = VideoMerger(FAST_VIDEO_CONFIG)
 project/
 ├── dongphuc/          # Input videos
 ├── video_chia_2/      # Background videos
-├── effects/           # GIF effects
+├── effects/           # Original GIF effects
+├── generated_effects/ # Generated tiled GIFs (git-ignored)
 ├── output/            # Processed videos
 ├── config.py          # Configuration
-├── merged_video_optimized.py  # Main script
+├── main.py            # Main script
+├── manage_generated_effects.py  # Effects management utility
 ├── requirements.txt   # Dependencies
 └── README_OPTIMIZED.md
 ```
@@ -150,11 +153,39 @@ The tool uses Python's logging module with different levels:
 - **WARNING**: Non-critical issues
 - **ERROR**: Critical errors that may affect processing
 
+## Generated Effects Management
+
+The tool automatically creates tiled GIFs in the `generated_effects/` directory. This directory is git-ignored to prevent large generated files from being committed.
+
+### Managing Generated Effects
+
+Use the `manage_generated_effects.py` utility:
+
+```bash
+# Show status of generated effects
+python manage_generated_effects.py --status
+
+# List all generated files
+python manage_generated_effects.py --list
+
+# Clean up files older than 7 days
+python manage_generated_effects.py --cleanup 7
+
+# Create directory if it doesn't exist
+python manage_generated_effects.py --create
+```
+
+### Directory Structure
+
+- `effects/`: Original GIF files (committed to git)
+- `generated_effects/`: Generated tiled GIFs (git-ignored)
+- `output/`: Final processed videos
+
 ## Migration from Original
 
 To migrate from the original script:
 
-1. Replace `merged-video.py` with `merged_video_optimized.py`
+1. Replace `merged-video.py` with `main.py`
 2. Use the new configuration system
 3. Update any custom scripts to use the new API
 

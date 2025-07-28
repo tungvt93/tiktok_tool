@@ -23,6 +23,7 @@ class VideoConfig:
     BACKGROUND_DIR: str = "video_chia_2"
     OUTPUT_DIR: str = "output"
     EFFECTS_DIR: str = "effects"
+    GENERATED_EFFECTS_DIR: str = "generated_effects"  # New folder for generated GIFs
     
     # File patterns
     INPUT_PATTERN: str = "*.mp4"

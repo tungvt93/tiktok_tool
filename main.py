@@ -43,6 +43,7 @@ class VideoConfig:
     BACKGROUND_DIR: str = "video_chia_2"
     OUTPUT_DIR: str = "output"
     EFFECTS_DIR: str = "effects"
+    GENERATED_EFFECTS_DIR: str = "generated_effects"  # New folder for generated GIFs
     
     # File patterns
     INPUT_PATTERN: str = "*.mp4"
@@ -412,7 +413,11 @@ class VideoMerger:
                                original_gif_path: str = "effects/star.gif") -> Optional[str]:
         """Get existing tiled GIF or create new one"""
         try:
-            output_gif_path = f"{self.config.EFFECTS_DIR}/star_tiled_{self.config.OUTPUT_WIDTH}x{self.config.OUTPUT_HEIGHT}.gif"
+            # Create generated effects directory if it doesn't exist
+            os.makedirs(self.config.GENERATED_EFFECTS_DIR, exist_ok=True)
+            
+            # Use generated effects directory for new GIFs
+            output_gif_path = f"{self.config.GENERATED_EFFECTS_DIR}/star_tiled_{self.config.OUTPUT_WIDTH}x{self.config.OUTPUT_HEIGHT}.gif"
             
             if self.gif_processor.create_tiled_gif(original_gif_path, output_gif_path, 
                                                  self.config.output_size):
