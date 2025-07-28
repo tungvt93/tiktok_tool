@@ -16,7 +16,7 @@ def load_config():
     except FileNotFoundError:
         print("config.json not found, using defaults")
         return {
-            "opening_effect": 5,
+            "opening_effect": 6,
             "effect_duration": 2.0,
             "add_gif_effects": True
         }

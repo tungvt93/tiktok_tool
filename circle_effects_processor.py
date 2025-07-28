@@ -42,7 +42,10 @@ class CircleEffectsProcessor:
         
         Y, X = np.ogrid[:self.height, :self.width]
         circle = (X - self.center_x)**2 + (Y - self.center_y)**2 <= radius**2
-        mask[circle] = 1
+        
+        # ✅ FIXED: Mask = 1 outside circle (black background), 0 inside circle (video visible)
+        mask[~circle] = 1  # Outside circle = black background
+        mask[circle] = 0   # Inside circle = video visible
         return mask
     
     def circle_rotate_mask(self, t: float, clockwise: bool = True) -> np.ndarray:
@@ -141,16 +144,16 @@ class CircleEffectsProcessor:
                 
                 # Apply mask to video using FFmpeg
                 if effect_type == "shrink":
-                    # For shrink: video with mask, black background
+                    # ✅ FIXED: For shrink: black background with video overlaid using inverted mask
                     cmd = [
                         "ffmpeg", "-y",
                         "-i", input_video,
                         "-i", mask_video,
                         "-filter_complex",
+                        f"color=black:{self.width}x{self.height}[bg];"
                         f"[0:v]scale={self.width}:{self.height}[video];"
                         f"[1:v]scale={self.width}:{self.height}[mask];"
                         f"[video][mask]alphamerge[alpha];"
-                        f"color=black:{self.width}x{self.height}[bg];"
                         f"[bg][alpha]overlay=shortest=1",
                         "-c:v", "libx264", "-preset", "ultrafast",
                         "-c:a", "copy",
