@@ -90,7 +90,7 @@ class CircleEffectsProcessor:
                 if t <= self.duration:
                     mask = mask_func(t)
                 else:
-                    # After effect duration, show full video
+                    # After effect duration, show full video (all pixels visible)
                     mask = np.ones((self.height, self.width), dtype=np.float32)
                 
                 # Convert to 8-bit grayscale
@@ -150,7 +150,7 @@ class CircleEffectsProcessor:
                         f"[0:v]scale={self.width}:{self.height}[video];"
                         f"[1:v]scale={self.width}:{self.height}[mask];"
                         f"[video][mask]alphamerge[alpha];"
-                        f"color=black:{self.width}x{self.height}:d={self.duration}[bg];"
+                        f"color=black:{self.width}x{self.height}[bg];"
                         f"[bg][alpha]overlay=shortest=1",
                         "-c:v", "libx264", "-preset", "ultrafast",
                         "-c:a", "copy",
@@ -163,7 +163,7 @@ class CircleEffectsProcessor:
                         "-i", input_video,
                         "-i", mask_video,
                         "-filter_complex",
-                        f"color=black:{self.width}x{self.height}:d={self.duration}[bg];"
+                        f"color=black:{self.width}x{self.height}[bg];"
                         f"[0:v]scale={self.width}:{self.height}[video];"
                         f"[1:v]scale={self.width}:{self.height}[mask];"
                         f"[video][mask]alphamerge[alpha];"

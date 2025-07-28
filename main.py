@@ -500,7 +500,7 @@ class OpeningEffectProcessor:
         width, height = self.config.output_size
         
         filter_expr = (
-            f"color=black:{width}x{height}:d={duration}[bg];"
+            f"color=black:{width}x{height}[bg];"
             f"[0:v]scale={width}:{height},fade=t=in:st=0:d={duration}[video];"
             f"[bg][video]overlay=shortest=1"
         )
