@@ -82,17 +82,17 @@ def create_gif_tiled_overlay(gif_path, target_duration, temp_dir, video_width=10
     """Tạo GIF tiled để lấp đầy màn hình thay vì scale"""
     gif_duration = get_video_duration(gif_path)
     
-    # Tính toán số lượng tile cần thiết
-    # GIF có kích thước 480x240, video 1080x1080
-    tiles_x = max(1, (video_width + 479) // 480)  # Làm tròn lên
-    tiles_y = max(1, (video_height + 239) // 240)  # Làm tròn lên
+    # Tính số frame cần thiết (10 fps * duration)
+    total_frames = int(target_duration * 10)
     
-    # Tạo tiled overlay trực tiếp từ GIF
+    # Tạo tiled overlay bằng cách sử dụng multiple overlay positions
+    # Thay vì dùng tile filter, chúng ta sẽ tạo nhiều GIF ở các vị trí khác nhau
     tiled_pattern = os.path.join(temp_dir, "gif_tiled_%04d.png")
     run_ffmpeg([
         "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
         "-t", str(target_duration),
-        "-vf", f"fps=10,tile={tiles_x}x{tiles_y}",  # Chỉ tile, không mirror
+        "-vf", f"fps=10,scale=480:240,pad={video_width}:{video_height}:0:0:color=0x00000000",  # Scale và pad với alpha=0
+        "-frames:v", str(total_frames),  # Chỉ định số frame cần thiết
         tiled_pattern
     ], silent=True)
     
@@ -145,20 +145,27 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_m
         # Bước 3: Render cuối cùng với optional effects
         if add_effects and os.path.exists("effects/star.gif"):
             if gif_mode == "tile":
-                # Sử dụng tiled/mirrored effect
-                print("🔄 Sử dụng tiled/mirrored GIF overlay...")
+                # Sử dụng tiled effect với multiple overlays
+                print("🔄 Sử dụng tiled GIF overlay...")
                 gif_pattern = create_gif_tiled_overlay("effects/star.gif", main_duration, temp_dir)
                 
+                # Tạo tiled effect bằng cách overlay nhiều lần ở các vị trí khác nhau
                 run_ffmpeg([
                     "ffmpeg", "-y",
                     "-i", temp_main,
                     "-i", temp_bg_loop,
                     "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
+                    "-framerate", "10", "-i", gif_pattern,
                     "-filter_complex",
                     "[0:v]scale=540:1080[left]; "
                     "[1:v]scale=540:1080[right]; "
                     "[left][right]hstack=inputs=2[stacked]; "
-                    "[stacked][2:v]overlay=0:0[v]",
+                    "[stacked][2:v]overlay=0:0[tmp1]; "
+                    "[tmp1][3:v]overlay=480:0[tmp2]; "
+                    "[tmp2][4:v]overlay=0:240[tmp3]; "
+                    "[tmp3][5:v]overlay=480:240[v]",
                     "-map", "[v]", "-map", "0:a",
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
@@ -173,6 +180,10 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_m
                 print("✨ Sử dụng GIF ở giữa màn hình...")
                 png_pattern = create_gif_center_overlay("effects/star.gif", main_duration, temp_dir)
                 
+                # Tính toán vị trí giữa: (1080-480)/2 = 300, (1080-240)/2 = 420
+                center_x = 300
+                center_y = 420
+                
                 run_ffmpeg([
                     "ffmpeg", "-y",
                     "-i", temp_main,
@@ -182,7 +193,7 @@ def render_single_optimized(main_video, bg_video, index, add_effects=True, gif_m
                     "[0:v]scale=540:1080[left]; "
                     "[1:v]scale=540:1080[right]; "
                     "[left][right]hstack=inputs=2[stacked]; "
-                    "[stacked][2:v]overlay=0:0[v]",
+                    f"[stacked][2:v]overlay={center_x}:{center_y}[v]",
                     "-map", "[v]", "-map", "0:a",
                     "-c:v", "libx264",
                     "-preset", "ultrafast",
