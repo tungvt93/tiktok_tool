@@ -17,6 +17,7 @@ import numpy as np
 import logging
 from functools import lru_cache
 import json
+from enum import Enum
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,19 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class EffectType(Enum):
+    """Types of opening effects"""
+    NONE = "none"
+    SLIDE_RIGHT_TO_LEFT = "slide_right_to_left"
+    SLIDE_LEFT_TO_RIGHT = "slide_left_to_right"
+    SLIDE_TOP_TO_BOTTOM = "slide_top_to_bottom"
+    SLIDE_BOTTOM_TO_TOP = "slide_bottom_to_top"
+    CIRCLE_EXPAND = "circle_expand"
+    CIRCLE_CONTRACT = "circle_contract"
+    CIRCLE_ROTATE_CW = "circle_rotate_cw"
+    CIRCLE_ROTATE_CCW = "circle_rotate_ccw"
+    FADE_IN = "fade_in"
 
 @dataclass
 class VideoConfig:
@@ -37,6 +51,10 @@ class VideoConfig:
     SPEED_MULTIPLIER: float = 1.3
     FRAME_RATE: int = 10
     CRF_VALUE: int = 23
+    
+    # Opening effect settings
+    OPENING_EFFECT: EffectType = EffectType.NONE
+    OPENING_DURATION: float = 2.0  # Duration of opening effect in seconds
     
     # Paths
     INPUT_DIR: str = "dongphuc"
@@ -294,6 +312,200 @@ class GIFProcessor:
             logger.error(f"Failed to save GIF: {e}")
             return False
 
+class OpeningEffectProcessor:
+    """Handles opening effects for videos"""
+    
+    def __init__(self, config: VideoConfig):
+        self.config = config
+    
+    def create_opening_effect(self, input_video: str, output_video: str, 
+                            effect_type: EffectType, duration: float) -> bool:
+        """Apply opening effect to video"""
+        if effect_type == EffectType.NONE:
+            return self._copy_video(input_video, output_video)
+        
+        try:
+            if effect_type in [EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT,
+                              EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]:
+                return self._apply_slide_effect(input_video, output_video, effect_type, duration)
+            elif effect_type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT]:
+                return self._apply_circle_expand_contract_effect(input_video, output_video, effect_type, duration)
+            elif effect_type in [EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
+                return self._apply_circle_rotate_effect(input_video, output_video, effect_type, duration)
+            elif effect_type == EffectType.FADE_IN:
+                return self._apply_fade_effect(input_video, output_video, duration)
+            else:
+                logger.warning(f"Unknown effect type: {effect_type}")
+                return self._copy_video(input_video, output_video)
+                
+        except Exception as e:
+            logger.error(f"Error applying opening effect: {e}")
+            return self._copy_video(input_video, output_video)
+    
+    def _copy_video(self, input_video: str, output_video: str) -> bool:
+        """Simple video copy without effects"""
+        cmd = [
+            "ffmpeg", "-y", "-i", input_video,
+            "-c", "copy", output_video
+        ]
+        return self._run_ffmpeg(cmd, silent=True)
+    
+    def _apply_slide_effect(self, input_video: str, output_video: str, 
+                           effect_type: EffectType, duration: float) -> bool:
+        """Apply slide effect (right-to-left, left-to-right, top-to-bottom, bottom-to-top)"""
+        width, height = self.config.output_size
+        
+        if effect_type == EffectType.SLIDE_RIGHT_TO_LEFT:
+            # Video slides from right to left over black background
+            filter_expr = (
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x='if(lt(t,{duration}),{width}-(t/{duration})*{width},0)':y=0"
+            )
+        elif effect_type == EffectType.SLIDE_LEFT_TO_RIGHT:
+            # Video slides from left to right over black background
+            filter_expr = (
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x='if(lt(t,{duration}),-(t/{duration})*{width}+{width},0)':y=0"
+            )
+        elif effect_type == EffectType.SLIDE_TOP_TO_BOTTOM:
+            # Video slides from top to bottom over black background
+            filter_expr = (
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x=0:y='if(lt(t,{duration}),-(t/{duration})*{height}+{height},0)'"
+            )
+        elif effect_type == EffectType.SLIDE_BOTTOM_TO_TOP:
+            # Video slides from bottom to top over black background
+            filter_expr = (
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x=0:y='if(lt(t,{duration}),{height}-(t/{duration})*{height},0)'"
+            )
+        else:
+            return False
+        
+        cmd = [
+            "ffmpeg", "-y", "-i", input_video,
+            "-filter_complex", filter_expr,
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_video
+        ]
+        return self._run_ffmpeg(cmd)
+    
+    def _apply_circle_expand_contract_effect(self, input_video: str, output_video: str,
+                                           effect_type: EffectType, duration: float) -> bool:
+        """Apply circle expand or contract effect using simpler approach"""
+        width, height = self.config.output_size
+        center_x, center_y = width // 2, height // 2
+        
+        if effect_type == EffectType.CIRCLE_EXPAND:
+            # Circle expands from center using scale and crop with expanding area
+            filter_expr = (
+                f"scale={width}:{height},"
+                f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
+                f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
+                f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
+                f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})'"
+            )
+        else:  # CIRCLE_CONTRACT
+            # Circle contracts to center using scale and simple crop approach
+            filter_expr = (
+                f"scale={width}:{height},"
+                f"crop=w='if(lt(t,{duration}),{width}-(t/{duration})*{width},{width})':"
+                f"h='if(lt(t,{duration}),{height}-(t/{duration})*{height},{height})':"
+                f"x='if(lt(t,{duration}),(t/{duration})*{center_x},{center_x})':"
+                f"y='if(lt(t,{duration}),(t/{duration})*{center_y},{center_y})'"
+            )
+        
+        cmd = [
+            "ffmpeg", "-y", "-i", input_video,
+            "-vf", filter_expr,
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_video
+        ]
+        return self._run_ffmpeg(cmd)
+    
+    def _apply_circle_rotate_effect(self, input_video: str, output_video: str,
+                                  effect_type: EffectType, duration: float) -> bool:
+        """Apply circle rotate effect (clockwise or counter-clockwise) using simpler approach"""
+        width, height = self.config.output_size
+        center_x, center_y = width // 2, height // 2
+        
+        if effect_type == EffectType.CIRCLE_ROTATE_CW:
+            # Clockwise rotation with expanding area
+            filter_expr = (
+                f"scale={width}:{height},"
+                f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
+                f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
+                f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
+                f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})',"
+                f"rotate='if(lt(t,{duration}),(t/{duration})*360,360)':bilinear=0"
+            )
+        else:  # CIRCLE_ROTATE_CCW
+            # Counter-clockwise rotation with expanding area
+            filter_expr = (
+                f"scale={width}:{height},"
+                f"crop=w='if(lt(t,{duration}),(t/{duration})*{width},{width})':"
+                f"h='if(lt(t,{duration}),(t/{duration})*{height},{height})':"
+                f"x='if(lt(t,{duration}),{center_x}-(t/{duration})*{center_x},{center_x}-{center_x})':"
+                f"y='if(lt(t,{duration}),{center_y}-(t/{duration})*{center_y},{center_y}-{center_y})',"
+                f"rotate='if(lt(t,{duration}),-(t/{duration})*360,-360)':bilinear=0"
+            )
+        
+        cmd = [
+            "ffmpeg", "-y", "-i", input_video,
+            "-vf", filter_expr,
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_video
+        ]
+        return self._run_ffmpeg(cmd)
+    
+    def _apply_fade_effect(self, input_video: str, output_video: str, duration: float) -> bool:
+        """Apply fade-in effect over black background"""
+        width, height = self.config.output_size
+        
+        filter_expr = (
+            f"color=black:{width}x{height}:d={duration}[bg];"
+            f"[0:v]scale={width}:{height},fade=t=in:st=0:d={duration}[video];"
+            f"[bg][video]overlay=shortest=1"
+        )
+        
+        cmd = [
+            "ffmpeg", "-y", "-i", input_video,
+            "-filter_complex", filter_expr,
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "copy",
+            output_video
+        ]
+        return self._run_ffmpeg(cmd)
+    
+    def _run_ffmpeg(self, cmd: List[str], silent: bool = False) -> bool:
+        """Execute FFmpeg command with error handling"""
+        try:
+            if not silent:
+                logger.info(f"Running opening effect: {' '.join(cmd)}")
+            
+            result = subprocess.run(
+                cmd, 
+                check=True, 
+                stdout=subprocess.DEVNULL if silent else None,
+                stderr=subprocess.PIPE if silent else None
+            )
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg command failed: {e}")
+            if silent and e.stderr:
+                logger.error(f"FFmpeg error: {e.stderr.decode()}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error running FFmpeg: {e}")
+            return False
+
 class VideoRenderer:
     """Handles video rendering operations"""
     
@@ -301,6 +513,7 @@ class VideoRenderer:
         self.config = config
         self.processor = processor
         self.gif_processor = GIFProcessor(config)
+        self.opening_effect_processor = OpeningEffectProcessor(config)
     
     def create_background_loop(self, bg_video: str, target_duration: float, 
                               temp_dir: str) -> Optional[str]:
@@ -357,6 +570,9 @@ class VideoRenderer:
     def render_with_effects(self, main_video: str, bg_video: str, 
                            gif_pattern: str, output_file: str) -> bool:
         """Render video with GIF effects overlay"""
+        # First render the basic video with effects
+        temp_output = output_file.replace('.mp4', '_temp.mp4')
+        
         cmd = [
             "ffmpeg", "-y",
             "-i", main_video,
@@ -374,13 +590,39 @@ class VideoRenderer:
             "-c:a", "aac",
             "-shortest",
             "-threads", "0",
-            output_file
+            temp_output
         ]
-        return self.processor.run_ffmpeg(cmd)
+        
+        if not self.processor.run_ffmpeg(cmd):
+            return False
+        
+        # Apply opening effect if specified
+        if self.config.OPENING_EFFECT != EffectType.NONE:
+            success = self.opening_effect_processor.create_opening_effect(
+                temp_output, output_file, 
+                self.config.OPENING_EFFECT, 
+                self.config.OPENING_DURATION
+            )
+            # Clean up temp file
+            try:
+                os.remove(temp_output)
+            except:
+                pass
+            return success
+        else:
+            # No opening effect, just rename temp file
+            try:
+                os.rename(temp_output, output_file)
+                return True
+            except:
+                return False
     
     def render_without_effects(self, main_video: str, bg_video: str, 
                               output_file: str) -> bool:
         """Render video without effects"""
+        # First render the basic video
+        temp_output = output_file.replace('.mp4', '_temp.mp4')
+        
         cmd = [
             "ffmpeg", "-y",
             "-i", main_video,
@@ -396,9 +638,32 @@ class VideoRenderer:
             "-c:a", "aac",
             "-shortest",
             "-threads", "0",
-            output_file
+            temp_output
         ]
-        return self.processor.run_ffmpeg(cmd)
+        
+        if not self.processor.run_ffmpeg(cmd):
+            return False
+        
+        # Apply opening effect if specified
+        if self.config.OPENING_EFFECT != EffectType.NONE:
+            success = self.opening_effect_processor.create_opening_effect(
+                temp_output, output_file, 
+                self.config.OPENING_EFFECT, 
+                self.config.OPENING_DURATION
+            )
+            # Clean up temp file
+            try:
+                os.remove(temp_output)
+            except:
+                pass
+            return success
+        else:
+            # No opening effect, just rename temp file
+            try:
+                os.rename(temp_output, output_file)
+                return True
+            except:
+                return False
 
 class VideoMerger:
     """Main class for video merging operations"""
@@ -432,6 +697,10 @@ class VideoMerger:
         """Render a single video with background and optional effects"""
         video_name = Path(main_video).stem
         output_file = f"{self.config.OUTPUT_DIR}/{video_name}.mp4"
+        
+        # Debug: Log the current config
+        logger.info(f"Current opening effect: {self.config.OPENING_EFFECT.value}")
+        logger.info(f"Current opening duration: {self.config.OPENING_DURATION}")
         
         if os.path.exists(output_file):
             logger.info(f"Skipping existing file: {output_file}")
@@ -515,31 +784,19 @@ class VideoMerger:
         # Preprocess backgrounds
         self.preprocess_backgrounds(background_videos)
         
-        # Determine optimal worker count
-        max_workers = min(os.cpu_count() or 1, len(download_videos))
-        logger.info(f"Using {max_workers} processes for rendering")
+        # For now, process sequentially to ensure config is properly passed
+        # TODO: Fix parallel processing config passing
+        logger.info("Processing videos sequentially to ensure proper config")
         
-        # Process videos in parallel
         success_count = 0
         total_count = len(download_videos)
         
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            futures = []
+        for idx, main_video in enumerate(download_videos):
+            bg_video = random.choice(background_videos)
+            logger.info(f"Processing: {Path(main_video).name} + {Path(bg_video).name}")
             
-            for idx, main_video in enumerate(download_videos):
-                bg_video = random.choice(background_videos)
-                logger.info(f"Queue: {Path(main_video).name} + {Path(bg_video).name}")
-                
-                future = executor.submit(self.render_single_video, main_video, bg_video, idx, add_effects)
-                futures.append(future)
-            
-            # Wait for completion
-            for future in as_completed(futures):
-                try:
-                    if future.result():
-                        success_count += 1
-                except Exception as e:
-                    logger.error(f"Processing error: {e}")
+            if self.render_single_video(main_video, bg_video, idx, add_effects):
+                success_count += 1
         
         logger.info(f"Completed: {success_count}/{total_count} videos processed successfully")
         return success_count == total_count
@@ -558,9 +815,82 @@ class VideoMerger:
 def main():
     """Main entry point"""
     try:
-        merger = VideoMerger()
+        # Show available effects
+        print("\n=== TIKTOK VIDEO PROCESSING TOOL ===")
+        print("Available opening effects:")
+        print("0. None (no effect)")
+        print("1. Slide from right to left")
+        print("2. Slide from left to right") 
+        print("3. Slide from top to bottom")
+        print("4. Slide from bottom to top")
+        print("5. Circle expand from center")
+        print("6. Circle contract to center")
+        print("7. Circle rotate clockwise")
+        print("8. Circle rotate counter-clockwise")
+        print("9. Fade in")
+        
+        # Get user choice
+        while True:
+            try:
+                choice = input("\nSelect opening effect (0-9): ").strip()
+                # Clean up any special characters
+                choice = choice.replace('\r', '').replace('\n', '').strip()
+                choice = int(choice)
+                if 0 <= choice <= 9:
+                    break
+                else:
+                    print("Please enter a number between 0 and 9")
+            except ValueError:
+                print("Please enter a valid number")
+        
+        # Get effect duration
+        while True:
+            try:
+                duration = input("Enter effect duration in seconds (default 2.0): ").strip()
+                # Clean up any special characters
+                duration = duration.replace('\r', '').replace('\n', '').strip()
+                if not duration:
+                    duration = 2.0
+                else:
+                    duration = float(duration)
+                if duration > 0:
+                    break
+                else:
+                    print("Duration must be positive")
+            except ValueError:
+                print("Please enter a valid number")
+        
+        # Map choice to effect type
+        effect_map = {
+            0: EffectType.NONE,
+            1: EffectType.SLIDE_RIGHT_TO_LEFT,
+            2: EffectType.SLIDE_LEFT_TO_RIGHT,
+            3: EffectType.SLIDE_TOP_TO_BOTTOM,
+            4: EffectType.SLIDE_BOTTOM_TO_TOP,
+            5: EffectType.CIRCLE_EXPAND,
+            6: EffectType.CIRCLE_CONTRACT,
+            7: EffectType.CIRCLE_ROTATE_CW,
+            8: EffectType.CIRCLE_ROTATE_CCW,
+            9: EffectType.FADE_IN
+        }
+        
+        # Create config with selected effect
+        config = VideoConfig()
+        config.OPENING_EFFECT = effect_map[choice]
+        config.OPENING_DURATION = duration
+        
+        print(f"\nSelected effect: {config.OPENING_EFFECT.value}")
+        print(f"Effect duration: {config.OPENING_DURATION} seconds")
+        
+        # Ask about GIF effects
+        add_gif_effects = input("Add GIF overlay effects? (y/n, default y): ").strip()
+        # Clean up any special characters
+        add_gif_effects = add_gif_effects.replace('\r', '').replace('\n', '').strip().lower()
+        add_gif_effects = add_gif_effects != 'n'
+        
+        merger = VideoMerger(config)
         merger.cleanup_temp_files()
-        success = merger.render_all_videos(add_effects=True)
+        success = merger.render_all_videos(add_effects=add_gif_effects)
         
         if success:
             logger.info("All videos processed successfully!")
