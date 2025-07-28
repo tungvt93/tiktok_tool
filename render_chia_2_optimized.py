@@ -45,7 +45,40 @@ def create_background_loop(bg_video, target_duration, temp_dir):
     
     return temp_bg_loop
 
-def render_single_optimized(main_video, bg_video, index):
+def create_gif_loop(gif_path, target_duration, temp_dir):
+    """Tạo GIF loop với thời lượng mong muốn và giữ alpha channel"""
+    gif_duration = get_video_duration(gif_path)
+    loop_count = int(target_duration // gif_duration) + 2  # +2 để đảm bảo đủ
+    
+    temp_gif_loop = os.path.join(temp_dir, "gif_loop.mp4")
+    
+    # Tạo GIF loop với thời lượng bằng video và giữ alpha channel
+    run_ffmpeg([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
+        "-t", str(target_duration),
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-pix_fmt", "yuva420p",  # Giữ alpha channel
+        "-an", temp_gif_loop
+    ], silent=True)
+    
+    return temp_gif_loop
+
+def create_gif_loop_png(gif_path, target_duration, temp_dir):
+    """Tạo GIF loop dưới dạng PNG sequence để giữ alpha channel tốt hơn"""
+    gif_duration = get_video_duration(gif_path)
+    
+    # Tạo PNG sequence từ GIF
+    png_pattern = os.path.join(temp_dir, "gif_frames_%04d.png")
+    run_ffmpeg([
+        "ffmpeg", "-y", "-stream_loop", "-1", "-i", gif_path,
+        "-t", str(target_duration),
+        "-vf", "fps=10",  # Giữ frame rate phù hợp
+        png_pattern
+    ], silent=True)
+    
+    return png_pattern
+
+def render_single_optimized(main_video, bg_video, index, add_effects=True):
     video_name = os.path.splitext(os.path.basename(main_video))[0]
     output_file = f"output/{video_name}.mp4"
 
@@ -74,22 +107,75 @@ def render_single_optimized(main_video, bg_video, index):
         # Bước 2: Tạo background loop
         temp_bg_loop = create_background_loop(bg_video, main_duration, temp_dir)
         
-        # Bước 3: Render cuối cùng - tất cả trong 1 lần gọi ffmpeg
-        run_ffmpeg([
-            "ffmpeg", "-y",
-            "-i", temp_main,
-            "-i", temp_bg_loop,
-            "-filter_complex",
-            "[0:v]scale=540:1080[left]; [1:v]scale=540:1080[right]; [left][right]hstack=inputs=2[v]",
-            "-map", "[v]", "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "23",
-            "-c:a", "aac",
-            "-shortest",
-            "-threads", "0",
-            output_file
-        ])
+        # Bước 3: Render cuối cùng với optional effects
+        if add_effects and os.path.exists("effects/star.gif"):
+            # Tạo GIF loop với thời lượng bằng video
+            temp_gif_loop = create_gif_loop("effects/star.gif", main_duration, temp_dir)
+            
+            # Thử phương pháp 1: MP4 với yuva420p
+            try:
+                run_ffmpeg([
+                    "ffmpeg", "-y",
+                    "-i", temp_main,
+                    "-i", temp_bg_loop,
+                    "-i", temp_gif_loop,
+                    "-filter_complex",
+                    "[0:v]scale=540:1080[left]; "
+                    "[1:v]scale=540:1080[right]; "
+                    "[left][right]hstack=inputs=2[stacked]; "
+                    "[2:v]scale=1080:1080:flags=lanczos[gif_scaled]; "
+                    "[stacked][gif_scaled]overlay=0:0:format=yuva420p[v]",
+                    "-map", "[v]", "-map", "0:a",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-shortest",
+                    "-threads", "0",
+                    output_file
+                ])
+            except:
+                # Nếu không thành công, thử phương pháp 2: PNG sequence
+                print("🔄 Thử phương pháp PNG sequence cho alpha channel...")
+                png_pattern = create_gif_loop_png("effects/star.gif", main_duration, temp_dir)
+                
+                run_ffmpeg([
+                    "ffmpeg", "-y",
+                    "-i", temp_main,
+                    "-i", temp_bg_loop,
+                    "-framerate", "10", "-i", png_pattern,
+                    "-filter_complex",
+                    "[0:v]scale=540:1080[left]; "
+                    "[1:v]scale=540:1080[right]; "
+                    "[left][right]hstack=inputs=2[stacked]; "
+                    "[2:v]scale=1080:1080:flags=lanczos[gif_scaled]; "
+                    "[stacked][gif_scaled]overlay=0:0[v]",
+                    "-map", "[v]", "-map", "0:a",
+                    "-c:v", "libx264",
+                    "-preset", "ultrafast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-shortest",
+                    "-threads", "0",
+                    output_file
+                ])
+        else:
+            # Render không có effects (như cũ)
+            run_ffmpeg([
+                "ffmpeg", "-y",
+                "-i", temp_main,
+                "-i", temp_bg_loop,
+                "-filter_complex",
+                "[0:v]scale=540:1080[left]; [1:v]scale=540:1080[right]; [left][right]hstack=inputs=2[v]",
+                "-map", "[v]", "-map", "0:a",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-shortest",
+                "-threads", "0",
+                output_file
+            ])
 
     print(f"✅ Render xong: {output_file}")
 
@@ -100,7 +186,7 @@ def preprocess_backgrounds(background_videos):
         get_video_duration(bg_video)
     print(f"✅ Đã cache {len(background_videos)} background videos")
 
-def render_all_optimized():
+def render_all_optimized(add_effects=True):
     os.makedirs("output", exist_ok=True)
     download_videos = sorted(glob("dongphuc/*.mp4"))
     background_videos = sorted(glob("video_chia_2/*.mp4"))
@@ -122,7 +208,7 @@ def render_all_optimized():
         for idx, main_video in enumerate(download_videos):
             bg_video = random.choice(background_videos)
             print(f"📋 Queue: {os.path.basename(main_video)} + {os.path.basename(bg_video)}")
-            future = executor.submit(render_single_optimized, main_video, bg_video, idx)
+            future = executor.submit(render_single_optimized, main_video, bg_video, idx, add_effects)
             futures.append(future)
         
         # Đợi tất cả hoàn thành
@@ -145,4 +231,5 @@ def cleanup_temp_files():
 
 if __name__ == "__main__":
     cleanup_temp_files()
-    render_all_optimized() 
+    # Có thể chọn có effects hay không
+    render_all_optimized(add_effects=True)  # True để thêm star.gif overlay 
