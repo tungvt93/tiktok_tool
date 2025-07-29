@@ -246,7 +246,7 @@ class VideoProcessingGUI(QMainWindow):
         self.create_rendering_panel(splitter)
         
         # Set splitter proportions
-        splitter.setSizes([400, 500, 500])
+        splitter.setSizes([300, 400, 700])
     
     def create_video_selection_panel(self, parent):
         """Create the left panel for video selection"""
@@ -1173,8 +1173,7 @@ class VideoProcessingGUI(QMainWindow):
                     progress_bar = QProgressBar()
                     progress_bar.setValue(progress)
                     progress_bar.setMaximum(100)
-                    progress_bar.setMinimumWidth(200)
-                    progress_bar.setMaximumHeight(8)
+                    progress_bar.setMaximumHeight(4)
                     
                     # Different colors for different statuses
                     if status == 'completed':
@@ -1190,7 +1189,6 @@ class VideoProcessingGUI(QMainWindow):
                         QProgressBar {{
                             border: none;
                             border-radius: 4px;
-                            text-align: center;
                             background-color: #1e1e1e;
                             color: transparent;
                         }}
