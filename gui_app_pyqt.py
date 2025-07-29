@@ -425,7 +425,7 @@ class VideoProcessingGUI(QMainWindow):
             }
         """)
         control_layout = QVBoxLayout(control_container)
-        control_layout.setContentsMargins(15, 15, 15, 15)
+        control_layout.setContentsMargins(0, 0, 0, 0)
         control_layout.setSpacing(10)
         
         # Start button with modern design
@@ -436,12 +436,11 @@ class VideoProcessingGUI(QMainWindow):
                     stop:0 #4CAF50, stop:1 #45a049);
                 border: none;
                 color: white;
-                padding: 15px 25px;
+                padding: 10px 20px;
                 border-radius: 8px;
                 font-weight: bold;
                 font-size: 14px;
                 font-family: 'Segoe UI';
-                min-height: 45px;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -463,14 +462,6 @@ class VideoProcessingGUI(QMainWindow):
         status_container = QWidget()
         status_layout = QHBoxLayout(status_container)
         status_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
-        status_layout.addWidget(self.status_indicator)
-        
-        self.status_label = QLabel("Ready to start")
-        self.status_label.setStyleSheet("color: #cccccc; font-size: 12px; font-weight: 500;")
-        status_layout.addWidget(self.status_label)
         status_layout.addStretch()
         
         control_layout.addWidget(status_container)
@@ -1246,10 +1237,6 @@ class VideoProcessingGUI(QMainWindow):
         # Start processing workers for parallel rendering
         self.start_processing_workers()
         
-        # Update status indicator
-        self.status_indicator.setStyleSheet("color: #FFA500; font-size: 16px;")
-        self.status_label.setText("Processing videos...")
-        
         self.log_message("Started rendering for all selected videos")
     
     def cleanup_existing_workers(self):
@@ -1549,8 +1536,6 @@ class VideoProcessingGUI(QMainWindow):
             if queue_completed and processing_completed:
                 self.log_message("🎉 All videos processed successfully!")
                 self.start_btn.setEnabled(True)
-                self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
-                self.status_label.setText("All tasks completed")
                 
                 # Force UI update
                 QApplication.processEvents()
@@ -1586,8 +1571,6 @@ class VideoProcessingGUI(QMainWindow):
             if all_completed:
                 self.log_message("Force UI update triggered")
                 self.start_btn.setEnabled(True)
-                self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
-                self.status_label.setText("All tasks completed")
                 QApplication.processEvents()
                 
                 if hasattr(self, 'progress_summary'):
