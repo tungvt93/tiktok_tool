@@ -1061,8 +1061,6 @@ class VideoProcessingGUI(QMainWindow):
                 widget.setStyleSheet("""
                     QWidget {
                         background-color: #2a2a2a;
-                        border: 1px solid #444444;
-                        border-radius: 8px;
                         margin: 2px;
                     }
                 """)
