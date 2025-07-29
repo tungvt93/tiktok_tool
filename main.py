@@ -67,6 +67,9 @@ class VideoConfig:
     INPUT_PATTERN: str = "*.mp4"
     BACKGROUND_PATTERN: str = "*.mp4"
     
+    # Selected GIF path (for GUI)
+    selected_gif_path: str = None
+    
     @property
     def output_size(self) -> Tuple[int, int]:
         return (self.OUTPUT_WIDTH, self.OUTPUT_HEIGHT)
@@ -705,7 +708,7 @@ class VideoMerger:
         self.gif_processor = GIFProcessor(self.config)  # Add GIF processor
     
     def get_or_create_tiled_gif(self, video_path: str, 
-                               original_gif_path: str = "effects/star.gif") -> Optional[str]:
+                               original_gif_path: str = None) -> Optional[str]:
         """Get existing tiled GIF or create new one"""
         try:
             # Create generated effects directory if it doesn't exist
@@ -755,8 +758,8 @@ class VideoMerger:
                     return False
                 
                 # Render with or without effects
-                if add_effects and os.path.exists(f"{self.config.EFFECTS_DIR}/star.gif"):
-                    tiled_gif_path = self.get_or_create_tiled_gif(main_video)
+                if add_effects and self.config.selected_gif_path and os.path.exists(self.config.selected_gif_path):
+                    tiled_gif_path = self.get_or_create_tiled_gif(main_video, self.config.selected_gif_path)
                     
                     if tiled_gif_path and os.path.exists(tiled_gif_path):
                         logger.info(f"Using tiled GIF: {Path(tiled_gif_path).name}")

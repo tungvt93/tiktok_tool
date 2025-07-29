@@ -18,7 +18,8 @@ try:
                                 QHBoxLayout, QLabel, QPushButton, QListWidget, 
                                 QCheckBox, QRadioButton, QButtonGroup, QLineEdit,
                                 QProgressBar, QTextEdit, QGroupBox, QFrame,
-                                QSplitter, QMessageBox, QListWidgetItem)
+                                QSplitter, QMessageBox, QListWidgetItem,
+                                QMenu, QScrollArea)
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
     from PyQt5.QtGui import QFont, QPalette, QColor
     PYQT_AVAILABLE = True
@@ -31,59 +32,58 @@ from main import VideoMerger, VideoConfig, EffectType, GIFProcessor
 
 class RenderingWorker(QThread):
     """Worker thread for video rendering"""
-    progress_updated = pyqtSignal(int, int)  # current, total
-    status_updated = pyqtSignal(str)
-    video_completed = pyqtSignal(int, bool)  # index, success
+    item_progress_updated = pyqtSignal(str, int)  # video_path, progress
+    item_status_updated = pyqtSignal(str, str)  # video_path, status
+    item_completed = pyqtSignal(str, bool)  # video_path, success
     finished = pyqtSignal()
     
-    def __init__(self, video_merger, selected_videos, video_files, config):
+    def __init__(self, video_merger, queue_items, config):
         super().__init__()
         self.video_merger = video_merger
-        self.selected_videos = selected_videos
-        self.video_files = video_files
+        self.queue_items = queue_items
         self.config = config
         self.is_running = True
     
     def run(self):
         try:
-            total_videos = len(self.selected_videos)
-            completed = 0
-            
-            for video_index in self.selected_videos:
+            for item_data in self.queue_items:
                 if not self.is_running:
                     break
                 
-                video_file = self.video_files[video_index]
+                video_file = item_data['video_path']
                 filename = Path(video_file).name
                 
-                self.status_updated.emit(f"Processing: {filename}")
+                # Update status to processing
+                self.item_status_updated.emit(video_file, 'processing')
                 
                 # Get random background video
                 background_videos = glob.glob(f"{self.config.BACKGROUND_DIR}/*.mp4")
                 if not background_videos:
-                    self.status_updated.emit("Error: No background videos found")
+                    self.item_status_updated.emit(video_file, 'failed')
                     continue
                 
                 import random
                 bg_video = random.choice(background_videos)
                 
-                # Render video
-                success = self.video_merger.render_single_video(video_file, bg_video, completed, add_effects=True)
+                # Simulate progress updates
+                for progress in range(0, 101, 10):
+                    if not self.is_running:
+                        break
+                    self.item_progress_updated.emit(video_file, progress)
+                    self.msleep(100)  # Simulate processing time
                 
-                self.video_completed.emit(completed, success)
+                # Render video
+                success = self.video_merger.render_single_video(video_file, bg_video, 0, add_effects=True)
                 
                 if success:
-                    self.status_updated.emit(f"✓ Completed: {filename}")
+                    self.item_completed.emit(video_file, True)
                 else:
-                    self.status_updated.emit(f"✗ Failed: {filename}")
-                
-                completed += 1
-                self.progress_updated.emit(completed, total_videos)
+                    self.item_completed.emit(video_file, False)
             
             self.finished.emit()
             
         except Exception as e:
-            self.status_updated.emit(f"Rendering error: {str(e)}")
+            print(f"Rendering error: {str(e)}")
             self.finished.emit()
     
     def stop(self):
@@ -115,15 +115,12 @@ class VideoProcessingGUI(QMainWindow):
         self.setup_ui()
         self.setup_styles()
         
-        # Setup timer for progress updates
-        self.progress_timer = QTimer()
-        self.progress_timer.timeout.connect(self.update_progress)
-        self.progress_timer.start(100)  # Update every 100ms
+
     
     def setup_ui(self):
         """Setup the main UI"""
-        self.setWindowTitle("TikTok Video Processing Tool")
-        self.setGeometry(100, 100, 1400, 800)
+        self.setWindowTitle("TikTok Process Video Tool")
+        self.setGeometry(100, 100, 1200, 700)
         
         # Central widget
         central_widget = QWidget()
@@ -131,11 +128,13 @@ class VideoProcessingGUI(QMainWindow):
         
         # Main layout
         main_layout = QVBoxLayout(central_widget)
+        main_layout.setContentsMargins(5, 5, 5, 5)  # Reduce margins
         
         # Title
-        title_label = QLabel("TikTok Video Processing Tool")
+        title_label = QLabel("TikTok Process Video Tool")
         title_label.setAlignment(Qt.AlignCenter)
-        title_label.setFont(QFont("Arial", 16, QFont.Bold))
+        title_label.setFont(QFont("Arial", 14, QFont.Bold))
+        title_label.setMaximumHeight(30)  # Reduce title height
         main_layout.addWidget(title_label)
         
         # Create three main sections
@@ -171,16 +170,29 @@ class VideoProcessingGUI(QMainWindow):
         self.select_all_cb.stateChanged.connect(self.toggle_select_all)
         layout.addWidget(self.select_all_cb)
         
-        # Video list
-        self.video_list = QListWidget()
-        self.video_list.setSelectionMode(QListWidget.MultiSelection)
-        self.video_list.itemSelectionChanged.connect(self.on_video_selection_change)
-        layout.addWidget(self.video_list)
+        # Video list frame
+        video_frame = QFrame()
+        video_layout = QVBoxLayout(video_frame)
+        
+        # Video radio buttons container
+        self.video_radio_container = QWidget()
+        self.video_radio_layout = QVBoxLayout(self.video_radio_container)
+        self.video_radio_layout.setAlignment(Qt.AlignTop)  # Align to top
+        video_layout.addWidget(self.video_radio_container)
+        
+        # Scroll area for video list
+        scroll_area = QScrollArea()
+        scroll_area.setWidget(self.video_radio_container)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMaximumHeight(400)
+        layout.addWidget(scroll_area)
         
         # Refresh button
         refresh_btn = QPushButton("Refresh Videos")
         refresh_btn.clicked.connect(self.refresh_video_list)
         layout.addWidget(refresh_btn)
+        
+
         
         # Populate video list
         self.populate_video_list()
@@ -246,94 +258,264 @@ class VideoProcessingGUI(QMainWindow):
         self.gif_random_cb = QCheckBox("Random GIF")
         gif_layout.addWidget(self.gif_random_cb)
         
-        # GIF list
-        self.gif_list = QListWidget()
-        self.gif_list.setSelectionMode(QListWidget.MultiSelection)
-        self.gif_list.itemSelectionChanged.connect(self.on_gif_selection_change)
-        gif_layout.addWidget(self.gif_list)
+        # GIF radio buttons
+        self.gif_effect_group = QButtonGroup()
+        self.gif_radio_container = QWidget()
+        self.gif_radio_layout = QVBoxLayout(self.gif_radio_container)
+        gif_layout.addWidget(self.gif_radio_container)
+        
+        # Scroll area for GIF list
+        gif_scroll_area = QScrollArea()
+        gif_scroll_area.setWidget(self.gif_radio_container)
+        gif_scroll_area.setWidgetResizable(True)
+        gif_scroll_area.setMaximumHeight(200)
+        gif_layout.addWidget(gif_scroll_area)
         
         layout.addWidget(gif_group)
-        
-        # Preview button
-        preview_btn = QPushButton("Preview Effects")
-        preview_btn.clicked.connect(self.preview_effects)
-        layout.addWidget(preview_btn)
         
         # Populate GIF list
         self.populate_gif_list()
     
     def create_rendering_panel(self, parent):
-        """Create the right panel for rendering queue and progress"""
+        """Create the rendering panel with modern design"""
         panel = QWidget()
+        panel.setMaximumWidth(450)
         parent.addWidget(panel)
         
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
         
-        # Title
+        # Modern title with icon and queue count
+        title_container = QWidget()
+        title_layout = QHBoxLayout(title_container)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        
+        title_icon = QLabel("🎬")
+        title_icon.setFont(QFont("Arial", 16))
+        title_layout.addWidget(title_icon)
+        
         title = QLabel("Rendering Queue")
-        title.setFont(QFont("Arial", 12, QFont.Bold))
-        layout.addWidget(title)
+        title.setFont(QFont("Segoe UI", 14, QFont.Bold))
+        title.setStyleSheet("color: #ffffff;")
+        title_layout.addWidget(title)
         
-        # Control buttons
-        control_layout = QHBoxLayout()
+        title_layout.addStretch()
         
-        self.start_btn = QPushButton("Start Rendering")
+        # Queue count badge
+        self.queue_count_label = QLabel("0")
+        self.queue_count_label.setStyleSheet("""
+            QLabel {
+                background-color: #4CAF50;
+                color: white;
+                border-radius: 10px;
+                padding: 2px 8px;
+                font-weight: bold;
+                font-size: 11px;
+                min-width: 20px;
+            }
+        """)
+        self.queue_count_label.setAlignment(Qt.AlignCenter)
+        title_layout.addWidget(self.queue_count_label)
+        
+        layout.addWidget(title_container)
+        
+        # Modern control section
+        control_container = QWidget()
+        control_container.setStyleSheet("""
+            QWidget {
+                background-color: #2a2a2a;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        control_layout = QVBoxLayout(control_container)
+        control_layout.setContentsMargins(15, 15, 15, 15)
+        control_layout.setSpacing(10)
+        
+        # Start button with modern design
+        self.start_btn = QPushButton("🚀 Start Rendering")
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #4CAF50, stop:1 #45a049);
+                border: none;
+                color: white;
+                padding: 15px 25px;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                font-family: 'Segoe UI';
+                min-height: 45px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #45a049, stop:1 #3d8b40);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3d8b40, stop:1 #2e7d32);
+            }
+            QPushButton:disabled {
+                background: #666666;
+                color: #999999;
+            }
+        """)
         self.start_btn.clicked.connect(self.start_rendering)
         control_layout.addWidget(self.start_btn)
         
-        self.stop_btn = QPushButton("Stop")
-        self.stop_btn.clicked.connect(self.stop_rendering)
-        self.stop_btn.setEnabled(False)
-        control_layout.addWidget(self.stop_btn)
+        # Status indicator
+        status_container = QWidget()
+        status_layout = QHBoxLayout(status_container)
+        status_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.pause_btn = QPushButton("Pause")
-        self.pause_btn.clicked.connect(self.pause_rendering)
-        self.pause_btn.setEnabled(False)
-        control_layout.addWidget(self.pause_btn)
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
+        status_layout.addWidget(self.status_indicator)
         
-        layout.addLayout(control_layout)
+        self.status_label = QLabel("Ready to start")
+        self.status_label.setStyleSheet("color: #cccccc; font-size: 12px; font-weight: 500;")
+        status_layout.addWidget(self.status_label)
+        status_layout.addStretch()
         
-        # Progress frame
-        progress_group = QGroupBox("Progress")
-        progress_layout = QVBoxLayout(progress_group)
+        control_layout.addWidget(status_container)
         
-        # Overall progress
-        progress_layout.addWidget(QLabel("Overall Progress:"))
-        self.overall_progress = QProgressBar()
-        progress_layout.addWidget(self.overall_progress)
+        layout.addWidget(control_container)
         
-        # Current video progress
-        progress_layout.addWidget(QLabel("Current Video:"))
-        self.current_progress = QProgressBar()
-        progress_layout.addWidget(self.current_progress)
+        # Modern queue list
+        queue_container = QWidget()
+        queue_container.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        queue_layout = QVBoxLayout(queue_container)
+        queue_layout.setContentsMargins(10, 10, 10, 10)
+        queue_layout.setSpacing(8)
         
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setFont(QFont("Arial", 10, QFont.Bold))
-        progress_layout.addWidget(self.status_label)
+        # Queue header
+        queue_header = QWidget()
+        header_layout = QHBoxLayout(queue_header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         
-        layout.addWidget(progress_group)
+        queue_title = QLabel("Active Tasks")
+        queue_title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px;")
+        header_layout.addWidget(queue_title)
         
-        # Queue list frame
-        queue_group = QGroupBox("Rendering Queue")
-        queue_layout = QVBoxLayout(queue_group)
+        header_layout.addStretch()
         
-        # Queue listbox
+        # Progress summary
+        self.progress_summary = QLabel("0/0 completed")
+        self.progress_summary.setStyleSheet("color: #888888; font-size: 11px;")
+        header_layout.addWidget(self.progress_summary)
+        
+        queue_layout.addWidget(queue_header)
+        
+        # Queue listbox with modern styling
         self.queue_list = QListWidget()
+        self.queue_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.queue_list.customContextMenuRequested.connect(self.show_queue_context_menu)
+        self.queue_list.setStyleSheet("""
+            QListWidget {
+                background-color: transparent;
+                border: none;
+                outline: none;
+                padding: 0px;
+            }
+            QListWidget::item {
+                background-color: transparent;
+                border: none;
+                margin: 0px;
+                padding: 0px;
+            }
+            QListWidget::item:hover {
+                background-color: transparent;
+            }
+            QListWidget::item:selected {
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background-color: #2a2a2a;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #555555;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #666666;
+            }
+        """)
         queue_layout.addWidget(self.queue_list)
         
-        layout.addWidget(queue_group)
+        layout.addWidget(queue_container)
         
-        # Log frame
-        log_group = QGroupBox("Log")
-        log_layout = QVBoxLayout(log_group)
+        # Modern log panel
+        log_container = QWidget()
+        log_container.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        log_layout = QVBoxLayout(log_container)
+        log_layout.setContentsMargins(10, 10, 10, 10)
+        log_layout.setSpacing(8)
         
-        # Log text area
+        # Log header
+        log_header = QWidget()
+        log_header_layout = QHBoxLayout(log_header)
+        log_header_layout.setContentsMargins(0, 0, 0, 0)
+        
+        log_title = QLabel("📋 Activity Log")
+        log_title.setStyleSheet("color: #ffffff; font-weight: bold; font-size: 12px;")
+        log_header_layout.addWidget(log_title)
+        
+        log_header_layout.addStretch()
+        
+        # Clear log button
+        clear_log_btn = QPushButton("🗑️")
+        clear_log_btn.setMaximumSize(24, 24)
+        clear_log_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #555555;
+                border: none;
+                border-radius: 12px;
+                color: white;
+                font-size: 10px;
+            }
+            QPushButton:hover {
+                background-color: #666666;
+            }
+        """)
+        clear_log_btn.clicked.connect(self.clear_log)
+        log_header_layout.addWidget(clear_log_btn)
+        
+        log_layout.addWidget(log_header)
+        
         self.log_text = QTextEdit()
-        self.log_text.setMaximumHeight(150)
+        self.log_text.setMaximumHeight(120)
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #2a2a2a;
+                border: 1px solid #444444;
+                border-radius: 6px;
+                color: #cccccc;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+                padding: 8px;
+                selection-background-color: #4CAF50;
+            }
+        """)
         log_layout.addWidget(self.log_text)
         
-        layout.addWidget(log_group)
+        layout.addWidget(log_container)
     
     def setup_styles(self):
         """Setup modern dark theme styles"""
@@ -420,53 +602,73 @@ class VideoProcessingGUI(QMainWindow):
         self.effects_files = sorted(glob.glob(effects_pattern))
     
     def populate_video_list(self):
-        """Populate the video listbox"""
-        self.video_list.clear()
-        for video_file in self.video_files:
+        """Populate the video radio buttons"""
+        # Clear existing radio buttons
+        for i in reversed(range(self.video_radio_layout.count())):
+            child = self.video_radio_layout.itemAt(i).widget()
+            if child:
+                child.deleteLater()
+        
+        # Create radio buttons for each video
+        self.video_radio_buttons = []
+        for i, video_file in enumerate(self.video_files):
             filename = Path(video_file).name
-            item = QListWidgetItem(filename)
-            self.video_list.addItem(item)
+            cb = QCheckBox(filename)
+            cb.setProperty("index", i)
+            cb.stateChanged.connect(self.on_video_selection_change)
+            self.video_radio_buttons.append(cb)
+            self.video_radio_layout.addWidget(cb)
     
     def populate_gif_list(self):
-        """Populate the GIF listbox"""
-        self.gif_list.clear()
-        for gif_file in self.effects_files:
+        """Populate the GIF radio buttons"""
+        # Clear existing radio buttons
+        for i in reversed(range(self.gif_radio_layout.count())):
+            child = self.gif_radio_layout.itemAt(i).widget()
+            if child:
+                child.deleteLater()
+        
+        # Create radio buttons for each GIF
+        self.gif_radio_buttons = []
+        for i, gif_file in enumerate(self.effects_files):
             filename = Path(gif_file).name
-            item = QListWidgetItem(filename)
-            self.gif_list.addItem(item)
+            rb = QRadioButton(filename)
+            rb.setProperty("index", i)
+            rb.setProperty("path", gif_file)
+            self.gif_effect_group.addButton(rb)
+            self.gif_radio_buttons.append(rb)
+            self.gif_radio_layout.addWidget(rb)
+        
+        # Set first GIF as default if available
+        if self.gif_radio_buttons:
+            self.gif_radio_buttons[0].setChecked(True)
     
     def toggle_select_all(self, state):
         """Toggle select all videos"""
-        if state == Qt.Checked:
-            for i in range(self.video_list.count()):
-                self.video_list.item(i).setSelected(True)
-        else:
-            self.video_list.clearSelection()
+        for cb in self.video_radio_buttons:
+            cb.setChecked(state == Qt.Checked)
         self.on_video_selection_change()
     
     def on_video_selection_change(self):
         """Handle video selection change"""
-        selected_items = self.video_list.selectedItems()
         self.selected_videos = set()
         
-        for item in selected_items:
-            index = self.video_list.row(item)
-            self.selected_videos.add(index)
+        for cb in self.video_radio_buttons:
+            if cb.isChecked():
+                index = cb.property("index")
+                self.selected_videos.add(index)
         
         # Update select all checkbox
-        if len(selected_items) == len(self.video_files):
+        if len(self.selected_videos) == len(self.video_files):
             self.select_all_cb.setChecked(True)
         else:
             self.select_all_cb.setChecked(False)
     
-    def on_gif_selection_change(self):
-        """Handle GIF selection change"""
-        selected_items = self.gif_list.selectedItems()
-        self.selected_effects = set()
-        
-        for item in selected_items:
-            index = self.gif_list.row(item)
-            self.selected_effects.add(index)
+    def get_selected_gif(self):
+        """Get selected GIF effect"""
+        for rb in self.gif_radio_buttons:
+            if rb.isChecked():
+                return rb.property("path")
+        return None
     
     def refresh_video_list(self):
         """Refresh the video list"""
@@ -474,36 +676,430 @@ class VideoProcessingGUI(QMainWindow):
         self.populate_video_list()
         self.log_message("Video list refreshed")
     
-    def preview_effects(self):
-        """Preview effects on a selected video"""
-        if not self.selected_videos:
-            QMessageBox.warning(self, "Warning", "Please select at least one video for preview")
+    def show_queue_context_menu(self, position):
+        """Show context menu for queue items"""
+        item = self.queue_list.itemAt(position)
+        if not item:
             return
         
-        # Get first selected video
-        video_index = list(self.selected_videos)[0]
-        video_file = self.video_files[video_index]
+        # Get item data
+        item_data = item.data(Qt.UserRole)
+        if not item_data:
+            return
         
-        # Get selected effects
-        opening_effect = self.opening_effect_group.checkedButton().property("value")
-        gif_effect = None
-        if self.selected_effects:
-            gif_index = list(self.selected_effects)[0]
-            gif_effect = self.effects_files[gif_index]
+        # Create context menu
+        context_menu = QMenu()
         
-        # Show preview dialog
-        content = f"Video: {Path(video_file).name}\n"
-        content += f"Opening Effect: {opening_effect}\n"
-        content += f"GIF Effect: {Path(gif_effect).name if gif_effect else 'None'}\n"
-        content += f"Duration: {self.duration_edit.text()} seconds"
+        # Control actions based on status
+        if item_data.get('status') == 'waiting':
+            start_action = context_menu.addAction("▶️ Start")
+            start_action.triggered.connect(lambda: self.start_queue_item(item_data))
+        elif item_data.get('status') == 'processing':
+            pause_action = context_menu.addAction("⏸️ Pause")
+            pause_action.triggered.connect(lambda: self.pause_queue_item(item_data))
+        elif item_data.get('status') == 'paused':
+            resume_action = context_menu.addAction("▶️ Resume")
+            resume_action.triggered.connect(lambda: self.resume_queue_item(item_data))
         
-        QMessageBox.information(self, "Effect Preview", content)
+        # Stop and Skip actions
+        if item_data.get('status') in ['processing', 'paused', 'waiting']:
+            stop_action = context_menu.addAction("⏹️ Stop")
+            stop_action.triggered.connect(lambda: self.stop_queue_item(item_data))
+            
+            skip_action = context_menu.addAction("⏭️ Skip")
+            skip_action.triggered.connect(lambda: self.skip_queue_item(item_data))
+        
+        # Remove action
+        if item_data.get('status') in ['completed', 'failed', 'stopped', 'skipped']:
+            remove_action = context_menu.addAction("🗑️ Remove")
+            remove_action.triggered.connect(lambda: self.remove_queue_item(item_data))
+        
+        # Show menu
+        context_menu.exec_(self.queue_list.mapToGlobal(position))
+    
+    def start_queue_item(self, item_data):
+        """Start a queue item"""
+        item_data['status'] = 'processing'
+        self.update_queue_item_display(item_data)
+        self.log_message(f"Started: {Path(item_data['video_path']).name}")
+        
+        # Start processing workers if not already running
+        if not hasattr(self, 'processing_workers') or not any(w.isRunning() for w in self.processing_workers):
+            self.start_processing_workers()
+    
+    def pause_queue_item(self, item_data):
+        """Pause a queue item"""
+        item_data['status'] = 'paused'
+        self.update_queue_item_display(item_data)
+        self.log_message(f"Paused: {Path(item_data['video_path']).name}")
+    
+    def resume_queue_item(self, item_data):
+        """Resume a queue item"""
+        item_data['status'] = 'processing'
+        self.update_queue_item_display(item_data)
+        self.log_message(f"Resumed: {Path(item_data['video_path']).name}")
+    
+    def stop_queue_item(self, item_data):
+        """Stop a queue item"""
+        item_data['status'] = 'stopped'
+        self.update_queue_item_display(item_data)
+        self.log_message(f"Stopped: {Path(item_data['video_path']).name}")
+    
+    def remove_queue_item(self, item_data):
+        """Remove a queue item"""
+        # Find and remove the item from queue list
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            if item.data(Qt.UserRole) == item_data:
+                self.queue_list.takeItem(i)
+                break
+        self.log_message(f"Removed: {Path(item_data['video_path']).name}")
+    
+    def skip_queue_item(self, item_data):
+        """Skip a queue item"""
+        item_data['status'] = 'skipped'
+        self.update_queue_item_display(item_data)
+        self.log_message(f"Skipped: {Path(item_data['video_path']).name}")
+        
+        # Remove from processing queue if present
+        if hasattr(self, 'processing_queue') and item_data in self.processing_queue:
+            self.processing_queue.remove(item_data)
+    
+    def start_processing_workers(self):
+        """Start processing workers for parallel rendering"""
+        if not hasattr(self, 'processing_queue'):
+            self.processing_queue = []
+        
+        if not hasattr(self, 'processing_workers'):
+            self.processing_workers = []
+        
+        # Maximum number of parallel workers (based on CPU cores)
+        import multiprocessing
+        max_workers = min(multiprocessing.cpu_count(), 4)  # Limit to 4 workers max
+        
+        # Start workers for waiting items (not processing items)
+        waiting_items = [item for item in self.processing_queue if item['status'] == 'waiting']
+        
+        # Mark items as processing
+        for item in waiting_items[:max_workers]:
+            item['status'] = 'processing'
+            self.update_queue_item_display(item)
+        
+        for i, item_data in enumerate(waiting_items[:max_workers]):
+            if i >= len(self.processing_workers):
+                # Create new worker
+                worker = RenderingWorker(self.video_merger, [item_data], self.config)
+                worker.item_progress_updated.connect(self.update_item_progress)
+                worker.item_status_updated.connect(self.update_item_status)
+                worker.item_completed.connect(self.update_item_completed)
+                worker.finished.connect(lambda w=worker: self.worker_finished(w))
+                self.processing_workers.append(worker)
+                worker.start()
+            elif not self.processing_workers[i].isRunning():
+                # Reuse existing worker
+                self.processing_workers[i].queue_items = [item_data]
+                self.processing_workers[i].start()
+        
+        self.log_message(f"Started {len(waiting_items[:max_workers])} processing workers")
+    
+    def worker_finished(self, worker):
+        """Handle worker completion"""
+        # Check for more items to process
+        waiting_items = [item for item in self.processing_queue if item['status'] == 'waiting']
+        if waiting_items:
+            # Start processing next item
+            next_item = waiting_items[0]
+            next_item['status'] = 'processing'
+            self.update_queue_item_display(next_item)
+            worker.queue_items = [next_item]
+            worker.start()
+            self.log_message(f"Started processing: {Path(next_item['video_path']).name}")
+        else:
+            # Check if all items are completed
+            all_completed = all(item['status'] in ['completed', 'failed', 'stopped', 'skipped'] 
+                              for item in self.processing_queue)
+            if all_completed:
+                self.log_message("All items processed")
+                self.start_btn.setEnabled(True)
+    
+    def add_control_buttons(self, layout, item_data, status):
+        """Add control buttons to queue item"""
+        # Modern button styles
+        button_style = """
+            QPushButton {
+                background-color: #4CAF50;
+                border: none;
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """
+        
+        stop_button_style = """
+            QPushButton {
+                background-color: #f44336;
+                border: none;
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """
+        
+        skip_button_style = """
+            QPushButton {
+                background-color: #ff9800;
+                border: none;
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #e68900;
+            }
+        """
+        
+        remove_button_style = """
+            QPushButton {
+                background-color: #9e9e9e;
+                border: none;
+                color: white;
+                padding: 6px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 28px;
+                max-width: 28px;
+                min-height: 28px;
+                max-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #757575;
+            }
+        """
+        
+        if status == 'waiting':
+            start_btn = QPushButton("▶️")
+            start_btn.setStyleSheet(button_style)
+            start_btn.clicked.connect(lambda: self.start_queue_item(item_data))
+            layout.addWidget(start_btn)
+        elif status == 'processing':
+            pause_btn = QPushButton("⏸️")
+            pause_btn.setStyleSheet(button_style)
+            pause_btn.clicked.connect(lambda: self.pause_queue_item(item_data))
+            layout.addWidget(pause_btn)
+            
+            stop_btn = QPushButton("⏹️")
+            stop_btn.setStyleSheet(stop_button_style)
+            stop_btn.clicked.connect(lambda: self.stop_queue_item(item_data))
+            layout.addWidget(stop_btn)
+            
+            skip_btn = QPushButton("⏭️")
+            skip_btn.setStyleSheet(skip_button_style)
+            skip_btn.clicked.connect(lambda: self.skip_queue_item(item_data))
+            layout.addWidget(skip_btn)
+        elif status == 'paused':
+            resume_btn = QPushButton("▶️")
+            resume_btn.setStyleSheet(button_style)
+            resume_btn.clicked.connect(lambda: self.resume_queue_item(item_data))
+            layout.addWidget(resume_btn)
+            
+            stop_btn = QPushButton("⏹️")
+            stop_btn.setStyleSheet(stop_button_style)
+            stop_btn.clicked.connect(lambda: self.stop_queue_item(item_data))
+            layout.addWidget(stop_btn)
+        
+        # Remove button for completed/failed/stopped/skipped items
+        if status in ['completed', 'failed', 'stopped', 'skipped']:
+            remove_btn = QPushButton("🗑️")
+            remove_btn.setStyleSheet(remove_button_style)
+            remove_btn.clicked.connect(lambda: self.remove_queue_item(item_data))
+            layout.addWidget(remove_btn)
+    
+    def update_queue_item_display(self, item_data):
+        """Update queue item display with modern design"""
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            if item.data(Qt.UserRole) == item_data:
+                filename = Path(item_data['video_path']).name
+                status = item_data['status']
+                progress = item_data.get('progress', 0)
+                
+                # Create modern widget container
+                widget = QWidget()
+                widget.setStyleSheet("""
+                    QWidget {
+                        background-color: #2a2a2a;
+                        border: 1px solid #444444;
+                        border-radius: 8px;
+                        margin: 2px;
+                    }
+                """)
+                layout = QVBoxLayout(widget)
+                layout.setContentsMargins(12, 12, 12, 12)
+                layout.setSpacing(8)
+                
+                # Top row: Status, filename, and controls
+                top_row = QWidget()
+                top_layout = QHBoxLayout(top_row)
+                top_layout.setContentsMargins(0, 0, 0, 0)
+                top_layout.setSpacing(10)
+                
+                # Status indicator with modern design
+                status_container = QWidget()
+                status_container.setStyleSheet("""
+                    QWidget {
+                        background-color: #1e1e1e;
+                        border-radius: 6px;
+                        padding: 4px;
+                    }
+                """)
+                status_layout = QHBoxLayout(status_container)
+                status_layout.setContentsMargins(8, 4, 8, 4)
+                
+                # Status icon and text
+                status_icon = ""
+                status_color = ""
+                status_text = ""
+                
+                if status == 'waiting':
+                    status_icon = "⏳"
+                    status_color = "#FFA500"
+                    status_text = "Waiting"
+                elif status == 'processing':
+                    status_icon = "🔄"
+                    status_color = "#4CAF50"
+                    status_text = "Processing"
+                elif status == 'paused':
+                    status_icon = "⏸️"
+                    status_color = "#FF9800"
+                    status_text = "Paused"
+                elif status == 'completed':
+                    status_icon = "✅"
+                    status_color = "#4CAF50"
+                    status_text = "Completed"
+                elif status == 'failed':
+                    status_icon = "❌"
+                    status_color = "#f44336"
+                    status_text = "Failed"
+                elif status == 'stopped':
+                    status_icon = "⏹️"
+                    status_color = "#9E9E9E"
+                    status_text = "Stopped"
+                elif status == 'skipped':
+                    status_icon = "⏭️"
+                    status_color = "#9E9E9E"
+                    status_text = "Skipped"
+                else:
+                    status_icon = "❓"
+                    status_color = "#9E9E9E"
+                    status_text = "Unknown"
+                
+                status_icon_label = QLabel(status_icon)
+                status_icon_label.setStyleSheet(f"color: {status_color}; font-size: 14px;")
+                status_layout.addWidget(status_icon_label)
+                
+                status_text_label = QLabel(status_text)
+                status_text_label.setStyleSheet(f"color: {status_color}; font-weight: bold; font-size: 11px;")
+                status_layout.addWidget(status_text_label)
+                
+                top_layout.addWidget(status_container)
+                
+                # Filename with modern styling
+                filename_label = QLabel(filename)
+                filename_label.setStyleSheet("""
+                    color: #ffffff;
+                    font-weight: bold;
+                    font-size: 12px;
+                    padding: 4px 8px;
+                    background-color: #1e1e1e;
+                    border-radius: 4px;
+                """)
+                top_layout.addWidget(filename_label)
+                
+                top_layout.addStretch()
+                
+                # Control buttons with modern design
+                if status == 'processing':
+                    # Progress percentage
+                    progress_label = QLabel(f"{progress}%")
+                    progress_label.setStyleSheet("""
+                        color: #4CAF50;
+                        font-weight: bold;
+                        font-size: 11px;
+                        background-color: #1e1e1e;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        border: 1px solid #4CAF50;
+                    """)
+                    top_layout.addWidget(progress_label)
+                
+                # Add control buttons
+                self.add_control_buttons(top_layout, item_data, status)
+                
+                layout.addWidget(top_row)
+                
+                # Progress bar (only show for processing items)
+                if status == 'processing':
+                    progress_bar = QProgressBar()
+                    progress_bar.setValue(progress)
+                    progress_bar.setMaximum(100)
+                    progress_bar.setMinimumWidth(200)
+                    progress_bar.setMaximumHeight(8)
+                    progress_bar.setStyleSheet("""
+                        QProgressBar {
+                            border: none;
+                            border-radius: 4px;
+                            text-align: center;
+                            background-color: #1e1e1e;
+                            color: transparent;
+                        }
+                        QProgressBar::chunk {
+                            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #4CAF50, stop:1 #45a049);
+                            border-radius: 4px;
+                        }
+                    """)
+                    layout.addWidget(progress_bar)
+                
+                # Set the widget for the list item
+                item.setSizeHint(widget.sizeHint())
+                self.queue_list.setItemWidget(item, widget)
+                break
+                
+                layout.addStretch()
+                
+                # Set the widget as the item widget
+                self.queue_list.setItemWidget(item, widget)
+                break
     
     def start_rendering(self):
-        """Start the rendering process"""
+        """Start the rendering process for all waiting items"""
         if not self.selected_videos:
             QMessageBox.warning(self, "Warning", "Please select at least one video to render")
             return
+        
+        # Disable start button
+        self.start_btn.setEnabled(False)
         
         # Prepare rendering queue
         self.prepare_rendering_queue()
@@ -511,23 +1107,21 @@ class VideoProcessingGUI(QMainWindow):
         # Configure effects
         self.configure_effects()
         
-        # Start rendering worker
-        self.rendering_worker = RenderingWorker(
-            self.video_merger, self.selected_videos, self.video_files, self.config
-        )
-        self.rendering_worker.progress_updated.connect(self.update_overall_progress)
-        self.rendering_worker.status_updated.connect(self.update_status)
-        self.rendering_worker.video_completed.connect(self.update_video_status)
-        self.rendering_worker.finished.connect(self.rendering_completed)
+        # Store queue items for processing
+        self.processing_queue = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            self.processing_queue.append(item_data)
         
-        self.rendering_worker.start()
+        # Start processing workers for parallel rendering
+        self.start_processing_workers()
         
-        # Update UI
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
-        self.pause_btn.setEnabled(True)
+        # Update status indicator
+        self.status_indicator.setStyleSheet("color: #FFA500; font-size: 16px;")
+        self.status_label.setText("Processing videos...")
         
-        self.log_message("Rendering started")
+        self.log_message("Started rendering for all selected videos")
     
     def prepare_rendering_queue(self):
         """Prepare the rendering queue with selected videos"""
@@ -535,13 +1129,31 @@ class VideoProcessingGUI(QMainWindow):
         
         for video_index in self.selected_videos:
             video_file = self.video_files[video_index]
-            filename = Path(video_file).name
-            item = QListWidgetItem(f"⏳ {filename}")
+            
+            # Create item with data
+            item = QListWidgetItem()
+            item_data = {
+                'video_path': video_file,
+                'status': 'waiting',
+                'progress': 0
+            }
+            item.setData(Qt.UserRole, item_data)
+            
             self.queue_list.addItem(item)
+            
+            # Update display
+            self.update_queue_item_display(item_data)
         
-        self.overall_progress.setMaximum(len(self.selected_videos))
-        self.overall_progress.setValue(0)
-        self.current_progress.setValue(0)
+        # Initialize processing queue
+        self.processing_queue = []
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            self.processing_queue.append(item_data)
+        
+        # Update UI elements
+        self.update_queue_count()
+        self.update_progress_summary()
     
     def configure_effects(self):
         """Configure effects based on user selection"""
@@ -567,79 +1179,124 @@ class VideoProcessingGUI(QMainWindow):
             effect_value = selected_button.property("value")
             self.config.OPENING_EFFECT = effect_map.get(effect_value, EffectType.NONE)
         
+        # GIF effect
+        if self.gif_random_cb.isChecked():
+            import random
+            if self.effects_files:
+                self.config.selected_gif_path = random.choice(self.effects_files)
+        else:
+            selected_gif = self.get_selected_gif()
+            self.config.selected_gif_path = selected_gif
+        
         # Duration
         try:
             self.config.OPENING_DURATION = float(self.duration_edit.text())
         except ValueError:
             self.config.OPENING_DURATION = 2.0
     
-    def update_overall_progress(self, current, total):
-        """Update overall progress bar"""
-        self.overall_progress.setValue(current)
+    def update_item_progress(self, video_path, progress):
+        """Update progress for a specific item"""
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            if item_data and item_data['video_path'] == video_path:
+                item_data['progress'] = progress
+                self.update_queue_item_display(item_data)
+                break
     
-    def update_status(self, status):
-        """Update status label"""
-        self.status_label.setText(status)
-        self.log_message(status)
+    def update_item_status(self, video_path, status):
+        """Update status for a specific item"""
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            if item_data and item_data['video_path'] == video_path:
+                item_data['status'] = status
+                self.update_queue_item_display(item_data)
+                break
     
-    def update_video_status(self, index, success):
-        """Update video status in queue"""
-        if index < self.queue_list.count():
-            item = self.queue_list.item(index)
-            if success:
-                item.setBackground(QColor("#4CAF50"))
-            else:
-                item.setBackground(QColor("#f44336"))
+    def update_item_completed(self, video_path, success):
+        """Update completion status for a specific item"""
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            if item_data and item_data['video_path'] == video_path:
+                item_data['status'] = 'completed' if success else 'failed'
+                item_data['progress'] = 100 if success else 0
+                self.update_queue_item_display(item_data)
+                filename = Path(video_path).name
+                if success:
+                    self.log_message(f"✓ Completed: {filename}")
+                else:
+                    self.log_message(f"✗ Failed: {filename}")
+                
+                # Update progress summary
+                self.update_progress_summary()
+                
+                # Check if all items are completed
+                all_completed = all(item['status'] in ['completed', 'failed', 'stopped', 'skipped'] 
+                                  for item in self.processing_queue)
+                if all_completed:
+                    self.log_message("🎉 All videos processed successfully!")
+                    self.start_btn.setEnabled(True)
+                    self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
+                    self.status_label.setText("All tasks completed")
+                break
     
-    def stop_rendering(self):
-        """Stop the rendering process"""
-        if self.rendering_worker:
-            self.rendering_worker.stop()
+    def stop_all_rendering(self):
+        """Stop all rendering processes"""
+        # Stop all processing workers
+        if hasattr(self, 'processing_workers'):
+            for worker in self.processing_workers:
+                if worker.isRunning():
+                    worker.stop()
         
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
-        self.status_label.setText("Stopped")
-        self.log_message("Rendering stopped")
-    
-    def pause_rendering(self):
-        """Pause/resume rendering"""
-        if self.pause_btn.text() == "Pause":
-            if self.rendering_worker:
-                self.rendering_worker.stop()
-            self.pause_btn.setText("Resume")
-            self.status_label.setText("Paused")
-            self.log_message("Rendering paused")
-        else:
-            # Restart rendering
-            self.pause_btn.setText("Pause")
-            self.status_label.setText("Resumed")
-            self.log_message("Rendering resumed")
-            self.start_rendering()
-    
-    def rendering_completed(self):
-        """Handle rendering completion"""
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)
-        self.pause_btn.setEnabled(False)
-        self.status_label.setText("Completed")
-        self.log_message("Rendering completed")
-    
-    def update_progress(self):
-        """Update progress bars"""
-        if self.rendering_worker and self.rendering_worker.isRunning():
-            # Simulate current video progress
-            current_value = self.current_progress.value()
-            if current_value < 100:
-                self.current_progress.setValue(current_value + 1)
-            else:
-                self.current_progress.setValue(0)
+        # Update all processing items to stopped
+        for i in range(self.queue_list.count()):
+            item = self.queue_list.item(i)
+            item_data = item.data(Qt.UserRole)
+            if item_data and item_data['status'] == 'processing':
+                item_data['status'] = 'stopped'
+                self.update_queue_item_display(item_data)
+        
+        self.log_message("All rendering processes stopped")
     
     def log_message(self, message):
         """Add message to log"""
         timestamp = time.strftime("%H:%M:%S")
         log_entry = f"[{timestamp}] {message}"
         self.log_text.append(log_entry)
+    
+    def clear_log(self):
+        """Clear the log"""
+        self.log_text.clear()
+        self.log_message("Log cleared")
+    
+    def update_queue_count(self):
+        """Update queue count badge"""
+        if hasattr(self, 'queue_count_label'):
+            count = self.queue_list.count()
+            self.queue_count_label.setText(str(count))
+    
+    def update_progress_summary(self):
+        """Update progress summary"""
+        if hasattr(self, 'progress_summary'):
+            total = self.queue_list.count()
+            completed = sum(1 for i in range(self.queue_list.count()) 
+                          if self.queue_list.item(i).data(Qt.UserRole)['status'] == 'completed')
+            self.progress_summary.setText(f"{completed}/{total} completed")
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        # Stop all processing workers
+        if hasattr(self, 'processing_workers'):
+            for worker in self.processing_workers:
+                if worker.isRunning():
+                    worker.stop()
+                    worker.wait(5000)  # Wait up to 5 seconds
+                    if worker.isRunning():
+                        worker.terminate()
+                        worker.wait(1000)
+        event.accept()
 
 def main():
     """Main entry point for GUI application"""
