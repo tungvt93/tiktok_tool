@@ -68,6 +68,7 @@ class RenderingWorker(QThread):
                 if not background_videos:
                     print(f"No background videos found for {filename}")
                     self.item_status_updated.emit(video_file, 'failed')
+                    self.item_completed.emit(video_file, False)  # Add missing completion signal
                     continue
                 
                 import random
@@ -82,12 +83,14 @@ class RenderingWorker(QThread):
                 if success:
                     print(f"Worker completed successfully: {filename}")
                     # Update to completed status
+                    print(f"Emitting completed status for {filename}")
                     self.item_status_updated.emit(video_file, 'completed')
                     self.item_progress_updated.emit(video_file, 100)
                     self.item_completed.emit(video_file, True)
                 else:
                     print(f"Worker failed: {filename}")
                     # Update to failed status
+                    print(f"Emitting failed status for {filename}")
                     self.item_status_updated.emit(video_file, 'failed')
                     self.item_progress_updated.emit(video_file, 0)
                     self.item_completed.emit(video_file, False)
@@ -97,40 +100,81 @@ class RenderingWorker(QThread):
             
         except Exception as e:
             print(f"Rendering error: {str(e)}")
+            # Ensure all items are marked as failed when exception occurs
+            for item_data in self.queue_items:
+                video_file = item_data['video_path']
+                self.item_status_updated.emit(video_file, 'failed')
+                self.item_completed.emit(video_file, False)
             self.finished.emit()
     
     def render_video_with_progress(self, video_file, bg_video):
         """Render video with real progress tracking"""
         try:
-            # Simulate realistic progress updates for video processing
-            progress_stages = [
-                (10, "Preparing video..."),
-                (25, "Speed adjustment..."),
-                (40, "Background processing..."),
-                (60, "Effects application..."),
-                (80, "Final rendering..."),
-                (95, "Applying opening effect..."),
-                (100, "Completed")
-            ]
+            print(f"Starting render for {video_file}")
             
-            for progress, stage in progress_stages:
-                if not self.is_running:
-                    return False
-                
-                # Emit progress update
-                self.item_progress_updated.emit(video_file, progress)
-                
-                # Simulate processing time based on stage
-                if progress < 100:
-                    if progress < 40:
-                        self.msleep(200)  # Faster for early stages
-                    elif progress < 80:
-                        self.msleep(300)  # Medium for main processing
-                    else:
-                        self.msleep(150)  # Faster for final stages
+            # Stage 1: Preparation (0-10%)
+            print(f"Emitting progress 0% for {video_file}")
+            self.item_progress_updated.emit(video_file, 0)
+            self.msleep(100)
+            print(f"Emitting progress 5% for {video_file}")
+            self.item_progress_updated.emit(video_file, 5)
+            self.msleep(100)
+            print(f"Emitting progress 10% for {video_file}")
+            self.item_progress_updated.emit(video_file, 10)
             
-            # Actually render the video
+            # Stage 2: Speed adjustment (10-25%)
+            self.item_progress_updated.emit(video_file, 15)
+            self.msleep(150)
+            self.item_progress_updated.emit(video_file, 20)
+            self.msleep(150)
+            self.item_progress_updated.emit(video_file, 25)
+            
+            # Stage 3: Background processing (25-40%)
+            self.item_progress_updated.emit(video_file, 30)
+            self.msleep(200)
+            self.item_progress_updated.emit(video_file, 35)
+            self.msleep(200)
+            self.item_progress_updated.emit(video_file, 40)
+            
+            # Stage 4: Effects preparation (40-60%)
+            self.item_progress_updated.emit(video_file, 45)
+            self.msleep(250)
+            self.item_progress_updated.emit(video_file, 50)
+            self.msleep(250)
+            self.item_progress_updated.emit(video_file, 55)
+            self.msleep(250)
+            self.item_progress_updated.emit(video_file, 60)
+            
+            # Stage 5: Final rendering (60-90%)
+            self.item_progress_updated.emit(video_file, 65)
+            self.msleep(300)
+            self.item_progress_updated.emit(video_file, 70)
+            self.msleep(300)
+            self.item_progress_updated.emit(video_file, 75)
+            self.msleep(300)
+            self.item_progress_updated.emit(video_file, 80)
+            self.msleep(300)
+            self.item_progress_updated.emit(video_file, 85)
+            self.msleep(300)
+            self.item_progress_updated.emit(video_file, 90)
+            
+            # Stage 6: Apply opening effect (90-95%)
+            self.item_progress_updated.emit(video_file, 92)
+            self.msleep(200)
+            self.item_progress_updated.emit(video_file, 95)
+            
+            # Actually render the video (this is the real work)
+            print(f"Starting actual video render for {video_file}")
             success = self.video_merger.render_single_video(video_file, bg_video, 0, add_effects=True)
+            
+            if success:
+                # Only emit 100% after successful render
+                print(f"Emitting progress 100% for {video_file}")
+                self.item_progress_updated.emit(video_file, 100)
+                print(f"Video render completed successfully: {video_file}")
+            else:
+                print(f"Video render failed: {video_file}")
+            
             return success
             
         except Exception as e:
@@ -841,17 +885,11 @@ class VideoProcessingGUI(QMainWindow):
             # Always create new worker for better signal handling
             worker = RenderingWorker(self.video_merger, [item_data], self.config)
             
-            # Connect signals with proper lambda capture
-            worker.item_progress_updated.connect(
-                lambda video_path, progress, w=worker: self.update_item_progress(video_path, progress)
-            )
-            worker.item_status_updated.connect(
-                lambda video_path, status, w=worker: self.update_item_status(video_path, status)
-            )
-            worker.item_completed.connect(
-                lambda video_path, success, w=worker: self.update_item_completed(video_path, success)
-            )
-            worker.finished.connect(lambda w=worker: self.worker_finished(w))
+            # Connect signals using direct method references (no lambda)
+            worker.item_progress_updated.connect(self.update_item_progress)
+            worker.item_status_updated.connect(self.update_item_status)
+            worker.item_completed.connect(self.update_item_completed)
+            worker.finished.connect(self.worker_finished)
             
             # Add to workers list
             if i < len(self.processing_workers):
@@ -869,10 +907,14 @@ class VideoProcessingGUI(QMainWindow):
         
         self.log_message(f"Started {len(waiting_items[:max_workers])} processing workers")
     
-    def worker_finished(self, worker):
-        """Handle worker completion"""
+    def worker_finished(self):
+        """Handle worker completion - simplified without lambda"""
+        self.log_message("Worker finished signal received")
+        
         # Check for more items to process
         waiting_items = [item for item in self.processing_queue if item['status'] == 'waiting']
+        self.log_message(f"Found {len(waiting_items)} waiting items")
+        
         if waiting_items:
             # Start processing next item
             next_item = waiting_items[0]
@@ -882,32 +924,24 @@ class VideoProcessingGUI(QMainWindow):
             
             # Create new worker for next item
             new_worker = RenderingWorker(self.video_merger, [next_item], self.config)
-            new_worker.item_progress_updated.connect(
-                lambda video_path, progress, w=new_worker: self.update_item_progress(video_path, progress)
-            )
-            new_worker.item_status_updated.connect(
-                lambda video_path, status, w=new_worker: self.update_item_status(video_path, status)
-            )
-            new_worker.item_completed.connect(
-                lambda video_path, success, w=new_worker: self.update_item_completed(video_path, success)
-            )
-            new_worker.finished.connect(lambda w=new_worker: self.worker_finished(w))
+            new_worker.item_progress_updated.connect(self.update_item_progress)
+            new_worker.item_status_updated.connect(self.update_item_status)
+            new_worker.item_completed.connect(self.update_item_completed)
+            new_worker.finished.connect(self.worker_finished)
             
-            # Replace worker in list
-            worker_index = self.processing_workers.index(worker)
-            self.processing_workers[worker_index] = new_worker
+            # Find and replace worker in list
+            for i, worker in enumerate(self.processing_workers):
+                if not worker.isRunning():
+                    self.processing_workers[i] = new_worker
+                    break
+            
             new_worker.start()
             
             self.log_message(f"Started processing: {Path(next_item['video_path']).name}")
         else:
-            # Check if all items are completed
-            all_completed = all(item['status'] in ['completed', 'failed', 'stopped', 'skipped'] 
-                              for item in self.processing_queue)
-            if all_completed:
-                self.log_message("🎉 All videos processed successfully!")
-                self.start_btn.setEnabled(True)
-                self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
-                self.status_label.setText("All tasks completed")
+            # Use the new robust completion checking method
+            self.log_message("No waiting items, checking if all completed...")
+            self.check_all_completed()
     
     def add_control_buttons(self, layout, item_data, status):
         """Add control buttons to queue item"""
@@ -1185,10 +1219,13 @@ class VideoProcessingGUI(QMainWindow):
                 break
     
     def start_rendering(self):
-        """Start the rendering process for all waiting items"""
+        """Start rendering process for selected videos"""
         if not self.selected_videos:
-            QMessageBox.warning(self, "Warning", "Please select at least one video to render")
+            QMessageBox.warning(self, "Warning", "Please select at least one video to process")
             return
+        
+        # Clean up any existing workers and reset state
+        self.cleanup_existing_workers()
         
         # Disable start button
         self.start_btn.setEnabled(False)
@@ -1215,23 +1252,51 @@ class VideoProcessingGUI(QMainWindow):
         
         self.log_message("Started rendering for all selected videos")
     
+    def cleanup_existing_workers(self):
+        """Clean up existing workers and reset state"""
+        if hasattr(self, 'processing_workers'):
+            for worker in self.processing_workers:
+                if worker.isRunning():
+                    worker.stop()
+                    worker.wait(2000)  # Wait up to 2 seconds
+                    if worker.isRunning():
+                        worker.terminate()
+                        worker.wait(1000)
+        
+        # Reset processing queue
+        if hasattr(self, 'processing_queue'):
+            self.processing_queue.clear()
+        
+        # Reset workers list
+        self.processing_workers = []
+        
+        self.log_message("Cleaned up existing workers")
+    
     def prepare_rendering_queue(self):
         """Prepare the rendering queue with selected videos"""
         self.queue_list.clear()
         
+        # Generate unique IDs for tracking
+        import uuid
+        
         for video_index in self.selected_videos:
             video_file = self.video_files[video_index]
             
-            # Create item with data
+            # Create item with data and unique ID
             item = QListWidgetItem()
             item_data = {
+                'id': str(uuid.uuid4()),  # Unique identifier
                 'video_path': video_file,
+                'filename': Path(video_file).name,  # Store filename separately
                 'status': 'waiting',
                 'progress': 0
             }
             item.setData(Qt.UserRole, item_data)
             
             self.queue_list.addItem(item)
+            
+            # Debug: Log item creation
+            self.log_message(f"Created queue item: {item_data['filename']} (ID: {item_data['id'][:8]}...)")
             
             # Update display
             self.update_queue_item_display(item_data)
@@ -1289,14 +1354,36 @@ class VideoProcessingGUI(QMainWindow):
     def update_item_progress(self, video_path, progress):
         """Update progress for a specific item"""
         filename = Path(video_path).name
+
         self.log_message(f"Progress update: {filename} - {progress}%")
         
+        found = False
         for i in range(self.queue_list.count()):
             item = self.queue_list.item(i)
             item_data = item.data(Qt.UserRole)
-            if item_data and item_data['video_path'] == video_path:
-                item_data['progress'] = progress
-                self.update_queue_item_display(item_data)
+            if item_data:
+                # Compare by filename (more reliable than full path)
+                queue_filename = item_data.get('filename', Path(item_data['video_path']).name)
+                signal_filename = Path(video_path).name
+                
+                if queue_filename == signal_filename:
+                    item_data['progress'] = progress
+                    # CRITICAL: Set the updated data back to the QListWidgetItem
+                    item.setData(Qt.UserRole, item_data)
+                    self.update_queue_item_display(item_data)
+                    found = True
+                    self.log_message(f"Updated progress for {filename} (ID: {item_data.get('id', 'N/A')})")
+                    break
+        
+        if not found:
+            self.log_message(f"WARNING: Could not find {filename} in queue for progress update")
+            
+        # Also update processing queue
+        for queue_item in self.processing_queue:
+            queue_filename = queue_item.get('filename', Path(queue_item['video_path']).name)
+            signal_filename = Path(video_path).name
+            if queue_filename == signal_filename:
+                queue_item['progress'] = progress
                 break
     
     def update_item_status(self, video_path, status):
@@ -1304,52 +1391,209 @@ class VideoProcessingGUI(QMainWindow):
         filename = Path(video_path).name
         self.log_message(f"Status update: {filename} - {status}")
         
+        found = False
         for i in range(self.queue_list.count()):
             item = self.queue_list.item(i)
             item_data = item.data(Qt.UserRole)
-            if item_data and item_data['video_path'] == video_path:
-                item_data['status'] = status
-                self.update_queue_item_display(item_data)
+            if item_data:
+                # Compare by filename (more reliable than full path)
+                queue_filename = item_data.get('filename', Path(item_data['video_path']).name)
+                signal_filename = Path(video_path).name
+                
+                if queue_filename == signal_filename:
+                    item_data['status'] = status
+                    # CRITICAL: Set the updated data back to the QListWidgetItem
+                    item.setData(Qt.UserRole, item_data)
+                    self.update_queue_item_display(item_data)
+                    found = True
+                    self.log_message(f"Updated status for {filename} (ID: {item_data.get('id', 'N/A')}) to {status}")
+                    break
+        
+        if not found:
+            self.log_message(f"WARNING: Could not find {filename} in queue for status update")
+            
+        # Also update processing queue
+        for queue_item in self.processing_queue:
+            queue_filename = queue_item.get('filename', Path(queue_item['video_path']).name)
+            signal_filename = Path(video_path).name
+            if queue_filename == signal_filename:
+                queue_item['status'] = status
                 break
     
     def update_item_completed(self, video_path, success):
         """Update completion status for a specific item"""
+        filename = Path(video_path).name
+        self.log_message(f"Item completed: {filename} - {'success' if success else 'failed'}")
+        
+        # First, update processing_queue
+        for queue_item in self.processing_queue:
+            queue_filename = queue_item.get('filename', Path(queue_item['video_path']).name)
+            signal_filename = Path(video_path).name
+            if queue_filename == signal_filename:
+                queue_item['status'] = 'completed' if success else 'failed'
+                queue_item['progress'] = 100 if success else 0
+                self.log_message(f"Updated processing queue: {filename} -> {queue_item['status']}")
+                break
+        
+        # Then, update queue_list (UI)
+        found = False
+        self.log_message(f"Searching for {filename} in queue_list (count: {self.queue_list.count()})")
+        
         for i in range(self.queue_list.count()):
             item = self.queue_list.item(i)
             item_data = item.data(Qt.UserRole)
-            if item_data and item_data['video_path'] == video_path:
-                # Update status and progress
-                item_data['status'] = 'completed' if success else 'failed'
-                item_data['progress'] = 100 if success else 0
+            if item_data:
+                # Compare by filename (more reliable than full path)
+                queue_filename = item_data.get('filename', Path(item_data['video_path']).name)
+                signal_filename = Path(video_path).name
                 
-                # Update display immediately
-                self.update_queue_item_display(item_data)
+                self.log_message(f"Comparing: queue_filename='{queue_filename}' vs signal_filename='{signal_filename}'")
                 
-                # Update processing queue
-                for queue_item in self.processing_queue:
-                    if queue_item['video_path'] == video_path:
-                        queue_item['status'] = item_data['status']
-                        queue_item['progress'] = item_data['progress']
-                        break
-                
-                filename = Path(video_path).name
-                if success:
-                    self.log_message(f"✓ Completed: {filename}")
+                if queue_filename == signal_filename:
+                    # Update status and progress to match processing_queue
+                    old_status = item_data['status']
+                    item_data['status'] = 'completed' if success else 'failed'
+                    item_data['progress'] = 100 if success else 0
+                    
+                    self.log_message(f"Found item in queue_list: {filename} - {old_status} -> {item_data['status']}")
+                    
+                    # CRITICAL: Set the updated data back to the QListWidgetItem
+                    item.setData(Qt.UserRole, item_data)
+                    
+                    # Update display immediately
+                    self.update_queue_item_display(item_data)
+                    
+                    # Log completion
+                    status_text = "completed" if success else "failed"
+                    self.log_message(f"✅ {filename} {status_text} (ID: {item_data.get('id', 'N/A')})")
+                    
+                    # Update summary
+                    self.update_progress_summary()
+                    
+                    # Use QTimer to ensure UI update happens after all signals are processed
+                    QTimer.singleShot(100, self.check_all_completed)
+                    
+                    found = True
+                    break
                 else:
-                    self.log_message(f"✗ Failed: {filename}")
+                    self.log_message(f"No match for item {i}: {queue_filename} != {signal_filename}")
+            else:
+                self.log_message(f"Item {i} has no data")
+        
+        if not found:
+            self.log_message(f"WARNING: Could not find {filename} in queue for completion update")
+            # List all items in queue_list for debugging
+            self.log_message("All items in queue_list:")
+            for i in range(self.queue_list.count()):
+                item = self.queue_list.item(i)
+                item_data = item.data(Qt.UserRole)
+                if item_data:
+                    self.log_message(f"  Item {i}: {item_data.get('filename', 'unknown')} - {item_data.get('status', 'unknown')}")
+                else:
+                    self.log_message(f"  Item {i}: No data")
+            
+            # Fallback: Force update the first item if it's the only one and matches the filename
+            if self.queue_list.count() == 1:
+                item = self.queue_list.item(0)
+                item_data = item.data(Qt.UserRole)
+                if item_data:
+                    item_filename = item_data.get('filename', Path(item_data['video_path']).name)
+                    if item_filename == filename:
+                        self.log_message(f"Fallback: Updating single item {filename}")
+                        item_data['status'] = 'completed' if success else 'failed'
+                        item_data['progress'] = 100 if success else 0
+                        # CRITICAL: Set the updated data back to the QListWidgetItem
+                        item.setData(Qt.UserRole, item_data)
+                        self.update_queue_item_display(item_data)
+                        self.update_progress_summary()
+                        QTimer.singleShot(100, self.check_all_completed)
+                        found = True
+    
+    def check_all_completed(self):
+        """Check if all items are completed and update UI accordingly"""
+        try:
+            # Debug logging
+            self.log_message(f"Checking completion status...")
+            self.log_message(f"Queue list count: {self.queue_list.count()}")
+            self.log_message(f"Processing queue count: {len(self.processing_queue)}")
+            
+            # Check queue_list items
+            queue_items_status = []
+            for i in range(self.queue_list.count()):
+                item = self.queue_list.item(i)
+                if item and item.data(Qt.UserRole):
+                    item_data = item.data(Qt.UserRole)
+                    status = item_data.get('status', 'unknown')
+                    queue_items_status.append(status)
+                    self.log_message(f"Queue item {i}: {item_data.get('filename', 'unknown')} - {status}")
+                else:
+                    self.log_message(f"Queue item {i}: No data")
+            
+            # Check processing_queue items
+            processing_items_status = []
+            for item in self.processing_queue:
+                status = item.get('status', 'unknown')
+                processing_items_status.append(status)
+                self.log_message(f"Processing item: {item.get('filename', 'unknown')} - {status}")
+            
+            # Check if all items are completed
+            queue_completed = all(status in ['completed', 'failed', 'stopped', 'skipped'] 
+                                for status in queue_items_status) if queue_items_status else True
+            
+            processing_completed = all(status in ['completed', 'failed', 'stopped', 'skipped'] 
+                                     for status in processing_items_status) if processing_items_status else True
+            
+            self.log_message(f"Queue completed: {queue_completed}")
+            self.log_message(f"Processing completed: {processing_completed}")
+            
+            if queue_completed and processing_completed:
+                self.log_message("🎉 All videos processed successfully!")
+                self.start_btn.setEnabled(True)
+                self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
+                self.status_label.setText("All tasks completed")
                 
-                # Update progress summary
-                self.update_progress_summary()
+                # Force UI update
+                QApplication.processEvents()
                 
-                # Check if all items are completed
-                all_completed = all(item['status'] in ['completed', 'failed', 'stopped', 'skipped'] 
-                                  for item in self.processing_queue)
-                if all_completed:
-                    self.log_message("🎉 All videos processed successfully!")
-                    self.start_btn.setEnabled(True)
-                    self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
-                    self.status_label.setText("All tasks completed")
-                break
+                # Additional UI updates
+                if hasattr(self, 'progress_summary'):
+                    self.update_progress_summary()
+                
+                self.log_message("UI updated successfully")
+                
+                # Set up a fallback timer to check again in case UI didn't update
+                QTimer.singleShot(500, self.force_ui_update)
+                
+            else:
+                self.log_message(f"Not all items completed yet. Queue: {queue_completed}, Processing: {processing_completed}")
+                
+        except Exception as e:
+            self.log_message(f"Error checking completion status: {e}")
+            import traceback
+            self.log_message(f"Traceback: {traceback.format_exc()}")
+    
+    def force_ui_update(self):
+        """Force UI update as a fallback mechanism"""
+        try:
+            # Check if we need to update UI
+            all_completed = all(
+                item.data(Qt.UserRole)['status'] in ['completed', 'failed', 'stopped', 'skipped'] 
+                for i in range(self.queue_list.count())
+                for item in [self.queue_list.item(i)]
+                if item.data(Qt.UserRole)
+            )
+            
+            if all_completed:
+                self.log_message("Force UI update triggered")
+                self.start_btn.setEnabled(True)
+                self.status_indicator.setStyleSheet("color: #4CAF50; font-size: 16px;")
+                self.status_label.setText("All tasks completed")
+                QApplication.processEvents()
+                
+                if hasattr(self, 'progress_summary'):
+                    self.update_progress_summary()
+        except Exception as e:
+            self.log_message(f"Error in force UI update: {e}")
     
     def stop_all_rendering(self):
         """Stop all rendering processes"""
