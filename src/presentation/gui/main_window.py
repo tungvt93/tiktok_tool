@@ -34,99 +34,352 @@ class MainWindowView(BaseView):
         self._setup_styles()
 
     def _setup_window(self):
-        """Setup main window properties"""
+        """Setup main window properties with modern features"""
         self.root.title("TikTok Video Processing Tool - Clean Architecture")
         self.root.geometry("1400x800")
-        self.root.configure(bg='#2b2b2b')
+        self.root.configure(bg='#1a1a1a')
 
         # Make window resizable
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(0, weight=1)
+        
+        # Set minimum window size
+        self.root.minsize(1000, 600)
+        
+        # Add window icon (placeholder)
+        try:
+            # You can add actual icon file here
+            # self.root.iconbitmap('path/to/icon.ico')
+            pass
+        except:
+            pass
+            
+        # Add smooth window animations
+        self._setup_animations()
+        
+        # Setup responsive design
+        self._setup_responsive_design()
+        
+        # Setup accessibility features
+        self._setup_accessibility()
+
+    def _setup_animations(self):
+        """Setup smooth animations and micro-interactions"""
+        # Store animation states
+        self.animation_states = {
+            'processing': False,
+            'hover_effects': {},
+            'button_states': {}
+        }
+        
+        # Bind hover effects for buttons
+        self._bind_hover_effects()
+        
+        # Setup progress animations
+        self._setup_progress_animations()
+
+    def _bind_hover_effects(self):
+        """Bind hover effects for interactive elements"""
+        def on_enter(event):
+            widget = event.widget
+            if hasattr(widget, 'configure'):
+                try:
+                    # Store original style
+                    if widget not in self.animation_states['hover_effects']:
+                        self.animation_states['hover_effects'][widget] = widget.cget('style')
+                    
+                    # Apply hover style
+                    if 'Primary.TButton' in str(widget.cget('style')):
+                        widget.configure()
+                    elif 'Secondary.TButton' in str(widget.cget('style')):
+                        widget.configure()
+                except:
+                    pass
+
+        def on_leave(event):
+            widget = event.widget
+            if hasattr(widget, 'configure') and widget in self.animation_states['hover_effects']:
+                try:
+                    # Restore original style
+                    original_style = self.animation_states['hover_effects'][widget]
+                    widget.configure(style=original_style)
+                except:
+                    pass
+
+        # Bind to all buttons (will be called after buttons are created)
+        self.root.bind('<Map>', lambda e: self._apply_hover_bindings())
+
+    def _apply_hover_bindings(self):
+        """Apply hover bindings to all buttons"""
+        def find_buttons(widget):
+            if hasattr(widget, 'winfo_children'):
+                for child in widget.winfo_children():
+                    if isinstance(child, ttk.Button):
+                        child.bind('<Enter>', self._on_button_enter)
+                        child.bind('<Leave>', self._on_button_leave)
+                    find_buttons(child)
+
+        find_buttons(self.root)
+
+    def _on_button_enter(self, event):
+        """Handle button hover enter"""
+        widget = event.widget
+        try:
+            # Add subtle scale effect
+            widget.configure(cursor="hand2")
+        except:
+            pass
+
+    def _on_button_leave(self, event):
+        """Handle button hover leave"""
+        widget = event.widget
+        try:
+            widget.configure(cursor="")
+        except:
+            pass
+
+    def _setup_progress_animations(self):
+        """Setup smooth progress bar animations"""
+        self.progress_animation_id = None
+        
+    def animate_progress(self, target_value, duration=500):
+        """Animate progress bar smoothly"""
+        if self.progress_animation_id:
+            self.root.after_cancel(self.progress_animation_id)
+            
+        current_value = self.overall_progress['value']
+        step = (target_value - current_value) / (duration / 16)  # 60 FPS
+        
+        def animate():
+            current = self.overall_progress['value']
+            if abs(current - target_value) > 0.1:
+                new_value = current + step
+                self.overall_progress['value'] = min(max(new_value, 0), 100)
+                self.overall_label.config(text=f"{self.overall_progress['value']:.1f}%")
+                self.progress_animation_id = self.root.after(16, animate)
+            else:
+                self.overall_progress['value'] = target_value
+                self.overall_label.config(text=f"{target_value:.1f}%")
+                
+        animate()
+
+    def show_loading_animation(self, message="Processing..."):
+        """Show loading animation with modern design"""
+        # Create loading overlay
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.destroy()
+            
+        self.loading_overlay = tk.Toplevel(self.root)
+        self.loading_overlay.title("")
+        self.loading_overlay.geometry("300x150")
+        self.loading_overlay.configure(bg='#1a1a1a')
+        self.loading_overlay.overrideredirect(True)
+        self.loading_overlay.attributes('-topmost', True)
+        
+        # Center the overlay
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - 150
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - 75
+        self.loading_overlay.geometry(f"300x150+{x}+{y}")
+        
+        # Loading content
+        content_frame = ttk.Frame(self.loading_overlay)
+        content_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Spinner animation
+        spinner_label = ttk.Label(content_frame, text="⏳", font=("Segoe UI", 24))
+        spinner_label.pack(pady=(0, 10))
+        
+        # Message
+        message_label = ttk.Label(content_frame, text=message, font=("Segoe UI", 10))
+        message_label.pack()
+        
+        # Animate spinner
+        self._animate_spinner(spinner_label)
+        
+    def _animate_spinner(self, spinner_label, frame=0):
+        """Animate loading spinner"""
+        spinner_chars = ["⏳", "⏰", "⏱️", "⏲️"]
+        spinner_label.config(text=spinner_chars[frame % len(spinner_chars)])
+        if hasattr(self, 'loading_overlay') and self.loading_overlay.winfo_exists():
+            self.root.after(200, lambda: self._animate_spinner(spinner_label, frame + 1))
+            
+    def hide_loading_animation(self):
+        """Hide loading animation"""
+        if hasattr(self, 'loading_overlay'):
+            self.loading_overlay.destroy()
+            delattr(self, 'loading_overlay')
+
+    def show_success_notification(self, message, duration=3000):
+        """Show success notification with modern design"""
+        self._show_notification(message, "success", duration)
+        
+    def show_error_notification(self, message, duration=5000):
+        """Show error notification with modern design"""
+        self._show_notification(message, "error", duration)
+        
+    def _show_notification(self, message, type_="info", duration=3000):
+        """Show notification with modern design"""
+        # Create notification window
+        notification = tk.Toplevel(self.root)
+        notification.title("")
+        notification.geometry("400x80")
+        notification.configure(bg='#1a1a1a')
+        notification.overrideredirect(True)
+        notification.attributes('-topmost', True)
+        
+        # Position at top-right
+        x = self.root.winfo_x() + self.root.winfo_width() - 420
+        y = self.root.winfo_y() + 20
+        notification.geometry(f"400x80+{x}+{y}")
+        
+        # Notification content
+        content_frame = ttk.Frame(notification)
+        content_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Icon and message
+        icon_text = "✅" if type_ == "success" else "❌" if type_ == "error" else "ℹ️"
+        icon_label = ttk.Label(content_frame, text=icon_text, font=("Segoe UI", 16))
+        icon_label.pack(side="left", padx=(10, 15))
+        
+        message_label = ttk.Label(content_frame, text=message, wraplength=300)
+        message_label.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        # Close button
+        close_btn = ttk.Button(content_frame, text="✕", width=3,
+                              command=notification.destroy)
+        close_btn.pack(side="right", padx=(0, 10))
+        
+        # Auto-close after duration
+        notification.after(duration, notification.destroy)
+        
+        # Slide-in animation
+        notification.withdraw()
+        notification.after(100, lambda: self._slide_in_notification(notification))
+        
+    def _slide_in_notification(self, notification):
+        """Slide in notification from right"""
+        notification.deiconify()
+        # Simple slide effect
+        for i in range(10):
+            x = self.root.winfo_x() + self.root.winfo_width() - 420 + (i * 2)
+            notification.geometry(f"400x80+{x}+{self.root.winfo_y() + 20}")
+            notification.update()
+            self.root.after(10)
 
     def _create_widgets(self):
-        """Create main window widgets"""
-        # Main container
+        """Create main window widgets with improved layout"""
+        # Main container with modern styling
         self.main_frame = ttk.Frame(self.root)
-        self.main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.main_frame.grid(row=0, column=0, sticky="nsew", padx=15, pady=15)
         self.main_frame.rowconfigure(1, weight=1)
+        self.main_frame.columnconfigure(0, weight=1)
         self.main_frame.columnconfigure(1, weight=1)
 
-        # Header
+        # Header with improved spacing
         self._create_header()
 
-        # Content area
+        # Content area with better organization
         self._create_content_area()
 
-        # Status bar
+        # Status bar with modern styling
         self._create_status_bar()
 
     def _create_header(self):
-        """Create header section"""
+        """Create header section with modern design"""
         header_frame = ttk.Frame(self.main_frame)
-        header_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        header_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 15), padx=5)
+        header_frame.columnconfigure(1, weight=1)
 
-        # Title
+        # Title with icon placeholder
+        title_frame = ttk.Frame(header_frame)
+        title_frame.grid(row=0, column=0, sticky="w", padx=15, pady=10)
+        
+        # Icon placeholder (you can add actual icon later)
+        icon_label = ttk.Label(title_frame, text="🎬", font=("Segoe UI", 20))
+        icon_label.pack(side="left", padx=(0, 10))
+        
         title_label = ttk.Label(
-            header_frame,
+            title_frame,
             text="TikTok Video Processing Tool",
-            font=("Arial", 16, "bold")
+            style="Header.TLabel"
         )
         title_label.pack(side="left")
 
-        # Control buttons
+        # Control buttons with better spacing
         controls_frame = ttk.Frame(header_frame)
-        controls_frame.pack(side="right")
+        controls_frame.grid(row=0, column=1, sticky="e", padx=15, pady=10)
 
-        self.refresh_btn = ttk.Button(controls_frame, text="Refresh Videos")
-        self.refresh_btn.pack(side="left", padx=(0, 5))
+        self.refresh_btn = ttk.Button(controls_frame, text="🔄 Refresh")
+        self.refresh_btn.pack(side="left", padx=(0, 8))
 
-        self.settings_btn = ttk.Button(controls_frame, text="Settings")
+        self.settings_btn = ttk.Button(controls_frame, text="⚙️ Settings")
         self.settings_btn.pack(side="left")
 
     def _create_content_area(self):
-        """Create main content area"""
-        # Left panel - Video selection
+        """Create main content area with improved layout"""
+        # Left panel - Video selection with card design
         self._create_video_panel()
 
-        # Right panel - Processing and effects
+        # Right panel - Processing and effects with card design
         self._create_processing_panel()
 
     def _create_video_panel(self):
-        """Create video selection panel"""
-        video_frame = ttk.LabelFrame(self.main_frame, text="Video Selection")
-        video_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 5))
-        video_frame.rowconfigure(1, weight=1)
+        """Create video selection panel with modern card design"""
+        video_frame = ttk.LabelFrame(self.main_frame, text="📁 Video Selection")
+        video_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 8))
+        video_frame.rowconfigure(2, weight=1)
         video_frame.columnconfigure(0, weight=1)
 
-        # Video controls
+        # Video controls with improved layout
         controls_frame = ttk.Frame(video_frame)
-        controls_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        controls_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=8)
 
-        self.select_all_btn = ttk.Button(controls_frame, text="Select All")
-        self.select_all_btn.pack(side="left", padx=(0, 5))
+        # Left side controls
+        left_controls = ttk.Frame(controls_frame)
+        left_controls.pack(side="left", fill="x", expand=True)
 
-        self.clear_selection_btn = ttk.Button(controls_frame, text="Clear Selection")
+        self.select_all_btn = ttk.Button(left_controls, text="✓ Select All")
+        self.select_all_btn.pack(side="left", padx=(0, 8))
+
+        self.clear_selection_btn = ttk.Button(left_controls, text="✗ Clear")
         self.clear_selection_btn.pack(side="left")
 
-        # Video list
+        # Right side search
+        search_frame = ttk.Frame(controls_frame)
+        search_frame.pack(side="right")
+
+        ttk.Label(search_frame, text="🔍").pack(side="left", padx=(0, 5))
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=20)
+        self.search_entry.pack(side="left")
+
+        # Video list with improved styling
         list_frame = ttk.Frame(video_frame)
-        list_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=8)
         list_frame.rowconfigure(0, weight=1)
         list_frame.columnconfigure(0, weight=1)
 
-        # Treeview for videos
+        # Treeview for videos with better columns
         columns = ("Name", "Duration", "Size", "Status")
-        self.video_tree = ttk.Treeview(list_frame, columns=columns, show="tree headings")
+        self.video_tree = ttk.Treeview(list_frame, columns=columns, show="tree headings", height=15)
 
-        # Configure columns
-        self.video_tree.heading("#0", text="Select")
-        self.video_tree.column("#0", width=60, minwidth=60)
+        # Configure columns with better widths
+        self.video_tree.heading("#0", text="☐")
+        self.video_tree.column("#0", width=40, minwidth=40, stretch=False)
+
+        column_configs = {
+            "Name": {"width": 250, "minwidth": 150},
+            "Duration": {"width": 80, "minwidth": 60},
+            "Size": {"width": 80, "minwidth": 60},
+            "Status": {"width": 80, "minwidth": 60}
+        }
 
         for col in columns:
             self.video_tree.heading(col, text=col)
-            self.video_tree.column(col, width=100)
+            config = column_configs.get(col, {"width": 100, "minwidth": 50})
+            self.video_tree.column(col, width=config["width"], minwidth=config["minwidth"])
 
-        # Scrollbars
+        # Scrollbars with modern styling
         v_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.video_tree.yview)
         h_scrollbar = ttk.Scrollbar(list_frame, orient="horizontal", command=self.video_tree.xview)
 
@@ -137,20 +390,24 @@ class MainWindowView(BaseView):
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
 
+        # Status info
+        self.video_status_label = ttk.Label(video_frame, text="No videos loaded")
+        self.video_status_label.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
+
     def _create_processing_panel(self):
-        """Create processing panel"""
-        processing_frame = ttk.LabelFrame(self.main_frame, text="Processing")
-        processing_frame.grid(row=1, column=1, sticky="nsew", padx=(5, 0))
+        """Create processing panel with modern card design"""
+        processing_frame = ttk.LabelFrame(self.main_frame, text="⚡ Processing & Effects")
+        processing_frame.grid(row=1, column=1, sticky="nsew", padx=(8, 0))
         processing_frame.rowconfigure(2, weight=1)
         processing_frame.columnconfigure(0, weight=1)
 
-        # Effects configuration
+        # Effects configuration with improved layout
         self._create_effects_section(processing_frame)
 
-        # Processing controls
+        # Processing controls with better organization
         self._create_processing_controls(processing_frame)
 
-        # Processing queue
+        # Processing queue with modern design
         self._create_processing_queue(processing_frame)
 
     def _create_effects_section(self, parent):
@@ -250,33 +507,185 @@ class MainWindowView(BaseView):
         self.stats_label.pack(side="right")
 
     def _setup_styles(self):
-        """Setup custom styles"""
+        """Setup custom styles with modern design"""
         style = ttk.Style()
-
-        # Configure dark theme colors
-        style.configure("TLabel", background="#2b2b2b", foreground="white")
-        style.configure("TFrame", background="#2b2b2b")
-        style.configure("TLabelFrame", background="#2b2b2b", foreground="white")
-        style.configure("TButton", background="#404040", foreground="white")
-        style.map("TButton", background=[("active", "#505050")])
+        
+        # Modern color palette
+        colors = {
+            'bg_primary': '#1a1a1a',
+            'bg_secondary': '#2d2d2d', 
+            'bg_tertiary': '#3d3d3d',
+            'accent_primary': '#007acc',
+            'accent_secondary': '#00b4d8',
+            'text_primary': '#ffffff',
+            'text_secondary': '#b0b0b0',
+            'success': '#28a745',
+            'warning': '#ffc107',
+            'error': '#dc3545',
+            'border': '#404040'
+        }
+        
+        # Configure modern dark theme
+        style.theme_use('clam')  # Use clam as base for better customization
+        
+        # Main window background
+        style.configure("Main.TFrame", background=colors['bg_primary'])
+        style.configure("Main.TLabel", 
+                       background=colors['bg_primary'], 
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 10))
+        
+        # Header styling
+        style.configure("Header.TLabel", 
+                       background=colors['bg_primary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 16, "bold"))
+        
+        # Frame styling
+        style.configure("Card.TFrame", 
+                       background=colors['bg_secondary'],
+                       relief="flat",
+                       borderwidth=1)
+        
+        style.configure("Card.TLabelFrame", 
+                       background=colors['bg_secondary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 10, "bold"),
+                       relief="flat",
+                       borderwidth=1)
+        
+        style.configure("Card.TLabelFrame.Label", 
+                       background=colors['bg_secondary'],
+                       foreground=colors['accent_primary'],
+                       font=("Segoe UI", 10, "bold"))
+        
+        # Also configure the base TLabelFrame for compatibility
+        style.configure("TLabelFrame", 
+                       background=colors['bg_secondary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 10, "bold"),
+                       relief="flat",
+                       borderwidth=1)
+        
+        style.configure("TLabelFrame.Label", 
+                       background=colors['bg_secondary'],
+                       foreground=colors['accent_primary'],
+                       font=("Segoe UI", 10, "bold"))
+        
+        # Configure other base styles for compatibility
+        style.configure("TFrame", background=colors['bg_secondary'])
+        style.configure("TLabel", 
+                       background=colors['bg_secondary'], 
+                       foreground=colors['text_primary'])
+        style.configure("TButton", 
+                       background=colors['bg_tertiary'],
+                       foreground=colors['text_primary'])
+        
+        # Button styling
+        style.configure("Primary.TButton",
+                       background=colors['accent_primary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 9, "bold"),
+                       relief="flat",
+                       borderwidth=0,
+                       padding=(12, 6))
+        
+        style.map("Primary.TButton",
+                 background=[("active", colors['accent_secondary']),
+                           ("pressed", colors['accent_secondary'])])
+        
+        style.configure("Secondary.TButton",
+                       background=colors['bg_tertiary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 9),
+                       relief="flat",
+                       borderwidth=0,
+                       padding=(10, 5))
+        
+        style.map("Secondary.TButton",
+                 background=[("active", colors['accent_primary']),
+                           ("pressed", colors['accent_primary'])])
+        
+        # Treeview styling
+        style.configure("Treeview",
+                       background=colors['bg_tertiary'],
+                       foreground=colors['text_primary'],
+                       fieldbackground=colors['bg_tertiary'],
+                       font=("Segoe UI", 9),
+                       rowheight=25)
+        
+        style.configure("Treeview.Heading",
+                       background=colors['bg_secondary'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 9, "bold"),
+                       relief="flat")
+        
+        style.map("Treeview",
+                 background=[("selected", colors['accent_primary'])],
+                 foreground=[("selected", colors['text_primary'])])
+        
+        # Progress bar styling
+        style.configure("Custom.Horizontal.TProgressbar",
+                       background=colors['accent_primary'],
+                       troughcolor=colors['bg_tertiary'],
+                       borderwidth=0,
+                       lightcolor=colors['accent_primary'],
+                       darkcolor=colors['accent_primary'])
+        
+        # Entry styling
+        style.configure("Custom.TEntry",
+                       fieldbackground=colors['bg_tertiary'],
+                       foreground=colors['text_primary'],
+                       borderwidth=1,
+                       relief="flat",
+                       font=("Segoe UI", 9))
+        
+        # Combobox styling
+        style.configure("Custom.TCombobox",
+                       fieldbackground=colors['bg_tertiary'],
+                       foreground=colors['text_primary'],
+                       background=colors['bg_tertiary'],
+                       borderwidth=1,
+                       relief="flat",
+                       font=("Segoe UI", 9))
+        
+        # Status indicators
+        style.configure("Success.TLabel",
+                       background=colors['success'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 9, "bold"))
+        
+        style.configure("Warning.TLabel",
+                       background=colors['warning'],
+                       foreground=colors['bg_primary'],
+                       font=("Segoe UI", 9, "bold"))
+        
+        style.configure("Error.TLabel",
+                       background=colors['error'],
+                       foreground=colors['text_primary'],
+                       font=("Segoe UI", 9, "bold"))
+        
+        # Apply styles to main window
+        self.root.configure(bg=colors['bg_primary'])
+        self.main_frame.configure()
 
     # BaseView interface implementation
     def show_error(self, message: str) -> None:
-        """Show error message"""
-        MessageBoxHelper.show_error("Error", message)
+        """Show error message with modern notification"""
+        self.show_error_notification(message)
 
     def show_success(self, message: str) -> None:
-        """Show success message"""
-        MessageBoxHelper.show_info("Success", message)
+        """Show success message with modern notification"""
+        self.show_success_notification(message)
 
     def show_loading(self, message: str = "Loading...") -> None:
-        """Show loading indicator"""
-        self.status_label.config(text=message)
+        """Show loading indicator with modern design"""
+        self.show_loading_animation(message)
         self.root.update_idletasks()
 
     def hide_loading(self) -> None:
         """Hide loading indicator"""
-        self.status_label.config(text="Ready")
+        self.hide_loading_animation()
 
     def update_ui(self) -> None:
         """Update UI elements"""
@@ -298,7 +707,7 @@ class MainWindowView(BaseView):
                 "Cached" if video.is_cached() else "New"
             )
 
-            item = self.video_tree.insert("", "end", values=values, tags=(video.path,))
+            item = self.video_tree.insert("", "end", values=values, tags=(video.path))
 
     def get_selected_videos(self) -> List[str]:
         """Get list of selected video paths"""
@@ -357,7 +766,7 @@ class MainWindowView(BaseView):
                 FormatHelper.format_duration(job.actual_duration or 0)
             )
 
-            self.queue_tree.insert("", "end", values=values, tags=(job.id,))
+            self.queue_tree.insert("", "end", values=values, tags=(job.id))
 
     def update_overall_progress(self, progress: float) -> None:
         """Update overall progress bar"""
@@ -366,6 +775,134 @@ class MainWindowView(BaseView):
     def update_statistics(self, stats_text: str) -> None:
         """Update statistics display"""
         self.stats_label.config(text=stats_text)
+
+    def _setup_responsive_design(self):
+        """Setup responsive design features"""
+        # Bind resize events
+        self.root.bind('<Configure>', self._on_window_resize)
+        
+        # Store original widget sizes for responsive scaling
+        self.original_sizes = {}
+        
+        # Responsive breakpoints
+        self.breakpoints = {
+            'small': 1000,
+            'medium': 1200,
+            'large': 1400
+        }
+
+    def _on_window_resize(self, event):
+        """Handle window resize for responsive design"""
+        if event.widget == self.root:
+            width = event.width
+            height = event.height
+            
+            # Determine current breakpoint
+            current_breakpoint = 'large'
+            for breakpoint, min_width in self.breakpoints.items():
+                if width < min_width:
+                    current_breakpoint = breakpoint
+                    break
+            
+            # Apply responsive adjustments
+            self._apply_responsive_layout(current_breakpoint, width, height)
+
+    def _apply_responsive_layout(self, breakpoint, width, height):
+        """Apply responsive layout based on breakpoint"""
+        # Adjust font sizes
+        font_scales = {
+            'small': 0.8,
+            'medium': 0.9,
+            'large': 1.0
+        }
+        
+        scale = font_scales.get(breakpoint, 1.0)
+        
+        # Adjust column widths for video tree
+        if hasattr(self, 'video_tree'):
+            column_widths = {
+                'small': {"Name": 180, "Duration": 60, "Size": 60, "Status": 60},
+                'medium': {"Name": 220, "Duration": 70, "Size": 70, "Status": 70},
+                'large': {"Name": 250, "Duration": 80, "Size": 80, "Status": 80}
+            }
+            
+            widths = column_widths.get(breakpoint, column_widths['large'])
+            for col, width_val in widths.items():
+                self.video_tree.column(col, width=width_val)
+
+    def _setup_accessibility(self):
+        """Setup accessibility features"""
+        # Add keyboard shortcuts
+        self.root.bind('<Control-r>', lambda e: self._on_refresh_videos())
+        self.root.bind('<Control-s>', lambda e: self._on_start_processing())
+        self.root.bind('<Control-q>', lambda e: self.root.quit())
+        self.root.bind('<F5>', lambda e: self._on_refresh_videos())
+        
+        # Add tooltips for better accessibility
+        self._setup_tooltips()
+        
+        # High contrast mode support
+        self.high_contrast_mode = False
+        self.root.bind('<Control-h>', lambda e: self._toggle_high_contrast())
+
+    def _setup_tooltips(self):
+        """Setup tooltips for better accessibility"""
+        tooltips = {
+            'refresh_btn': 'Refresh video list (Ctrl+R)',
+            'start_processing_btn': 'Start processing selected videos (Ctrl+S)',
+            'select_all_btn': 'Select all videos in the list',
+            'clear_selection_btn': 'Clear current selection',
+            'search_entry': 'Search videos by filename'
+        }
+        
+        # Apply tooltips after widgets are created
+        self.root.after(100, lambda: self._apply_tooltips(tooltips))
+
+    def _apply_tooltips(self, tooltips):
+        """Apply tooltips to widgets"""
+        for widget_name, tooltip_text in tooltips.items():
+            if hasattr(self, widget_name):
+                widget = getattr(self, widget_name)
+                self._create_tooltip(widget, tooltip_text)
+
+    def _create_tooltip(self, widget, text):
+        """Create tooltip for widget"""
+        def show_tooltip(event):
+            tooltip = tk.Toplevel()
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+            
+            label = ttk.Label(tooltip, text=text,
+                             background='#2d2d2d', relief='solid', borderwidth=1)
+            label.pack()
+            
+            def hide_tooltip():
+                tooltip.destroy()
+            
+            widget.tooltip = tooltip
+            widget.bind('<Leave>', lambda e: hide_tooltip())
+            widget.bind('<Button-1>', lambda e: hide_tooltip())
+        
+        widget.bind('<Enter>', show_tooltip)
+
+    def _toggle_high_contrast(self):
+        """Toggle high contrast mode"""
+        self.high_contrast_mode = not self.high_contrast_mode
+        
+        if self.high_contrast_mode:
+            # Apply high contrast colors
+            style = ttk.Style()
+            style.configure("Main.TLabel", 
+                           background="#000000", 
+                           foreground="#ffffff")
+            style.configure("Card.TFrame", 
+                           background="#000000")
+            style.configure("Primary.TButton",
+                           background="#ffffff",
+                           foreground="#000000")
+        else:
+            # Restore normal colors
+            self._setup_styles()
 
 
 class MainWindowPresenter(BasePresenter):

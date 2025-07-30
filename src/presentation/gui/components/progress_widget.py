@@ -30,91 +30,144 @@ class ProgressWidget:
         self._setup_events()
 
     def _create_widgets(self):
-        """Create widget components"""
-        # Main frame
-        self.frame = ttk.LabelFrame(self.parent, text="Processing Progress")
+        """Create widget components with modern design"""
+        # Main frame with modern styling
+        self.frame = ttk.LabelFrame(self.parent, text="📊 Processing Progress")
 
-        # Controls frame
+        # Controls frame with improved layout
         self.controls_frame = ttk.Frame(self.frame)
-        self.controls_frame.pack(fill="x", padx=5, pady=5)
+        self.controls_frame.pack(fill="x", padx=10, pady=8)
 
-        # Processing controls
-        self.start_btn = ttk.Button(self.controls_frame, text="Start Processing")
-        self.start_btn.pack(side="left", padx=(0, 5))
+        # Left side - Processing controls
+        left_controls = ttk.Frame(self.controls_frame)
+        left_controls.pack(side="left", fill="x", expand=True)
 
-        self.pause_btn = ttk.Button(self.controls_frame, text="Pause", state="disabled")
-        self.pause_btn.pack(side="left", padx=(0, 5))
+        self.start_btn = ttk.Button(left_controls, text="▶️ Start")
+        self.start_btn.pack(side="left", padx=(0, 8))
 
-        self.stop_btn = ttk.Button(self.controls_frame, text="Stop", state="disabled")
-        self.stop_btn.pack(side="left", padx=(0, 5))
+        self.pause_btn = ttk.Button(left_controls, text="⏸️ Pause", state="disabled")
+        self.pause_btn.pack(side="left", padx=(0, 8))
 
-        self.clear_btn = ttk.Button(self.controls_frame, text="Clear Completed")
+        self.stop_btn = ttk.Button(left_controls, text="⏹️ Stop", state="disabled")
+        self.stop_btn.pack(side="left", padx=(0, 8))
+
+        self.clear_btn = ttk.Button(left_controls, text="🗑️ Clear")
         self.clear_btn.pack(side="left")
 
-        # Overall progress
+        # Right side - Overall progress
         progress_frame = ttk.Frame(self.controls_frame)
-        progress_frame.pack(side="right", fill="x", expand=True, padx=(10, 0))
+        progress_frame.pack(side="right", fill="x", expand=True, padx=(15, 0))
 
-        ttk.Label(progress_frame, text="Overall:").pack(side="left", padx=(0, 5))
-        self.overall_progress = ttk.Progressbar(progress_frame, mode="determinate")
-        self.overall_progress.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        progress_header = ttk.Frame(progress_frame)
+        progress_header.pack(fill="x", pady=(0, 5))
 
-        self.overall_label = ttk.Label(progress_frame, text="0%", width=8)
+        ttk.Label(progress_header, text="Overall Progress:").pack(side="left")
+        self.overall_label = ttk.Label(progress_header, text="0%", width=8)
         self.overall_label.pack(side="right")
 
-        # Statistics frame
+        self.overall_progress = ttk.Progressbar(progress_frame, mode="determinate")
+        self.overall_progress.pack(fill="x")
+
+        # Statistics frame with modern cards
         self.stats_frame = ttk.Frame(self.frame)
-        self.stats_frame.pack(fill="x", padx=5, pady=5)
+        self.stats_frame.pack(fill="x", padx=10, pady=8)
 
-        # Statistics labels
-        self.queue_label = ttk.Label(self.stats_frame, text="Queue: 0")
-        self.queue_label.pack(side="left", padx=(0, 10))
+        # Create stat cards
+        self._create_stat_cards()
 
-        self.processing_label = ttk.Label(self.stats_frame, text="Processing: 0")
-        self.processing_label.pack(side="left", padx=(0, 10))
-
-        self.completed_label = ttk.Label(self.stats_frame, text="Completed: 0")
-        self.completed_label.pack(side="left", padx=(0, 10))
-
-        self.failed_label = ttk.Label(self.stats_frame, text="Failed: 0")
-        self.failed_label.pack(side="left")
-
-        self.success_rate_label = ttk.Label(self.stats_frame, text="Success: 0%")
-        self.success_rate_label.pack(side="right")
-
-        # Job list frame
+        # Job list frame with improved design
         self.job_list_frame = ttk.Frame(self.frame)
-        self.job_list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.job_list_frame.pack(fill="both", expand=True, padx=10, pady=8)
         self.job_list_frame.rowconfigure(0, weight=1)
         self.job_list_frame.columnconfigure(0, weight=1)
 
-        # Job treeview
+        # Job list header
+        list_header = ttk.Frame(self.job_list_frame)
+        list_header.pack(fill="x", pady=(0, 5))
+
+        ttk.Label(list_header, text="📋 Processing Queue", font=("Segoe UI", 10, "bold")).pack(side="left")
+
+        # Job treeview with modern styling
         columns = ("Video", "Status", "Progress", "Time", "Actions")
-        self.job_tree = ttk.Treeview(self.job_list_frame, columns=columns, show="headings", height=8)
+        self.job_tree = ttk.Treeview(self.job_list_frame, columns=columns, show="headings", height=10)
 
-        # Configure columns
-        column_widths = {"Video": 200, "Status": 100, "Progress": 100, "Time": 80, "Actions": 100}
-        for col in columns:
-            self.job_tree.heading(col, text=col)
-            self.job_tree.column(col, width=column_widths.get(col, 100), minwidth=50)
+        # Configure columns with better widths and icons
+        column_configs = {
+            "Video": {"width": 250, "minwidth": 150, "text": "🎬 Video"},
+            "Status": {"width": 100, "minwidth": 80, "text": "📊 Status"},
+            "Progress": {"width": 100, "minwidth": 80, "text": "📈 Progress"},
+            "Time": {"width": 80, "minwidth": 60, "text": "⏱️ Time"},
+            "Actions": {"width": 100, "minwidth": 80, "text": "⚙️ Actions"}
+        }
 
-        # Scrollbars
+        for col, config in column_configs.items():
+            self.job_tree.heading(col, text=config["text"])
+            self.job_tree.column(col, width=config["width"], minwidth=config["minwidth"])
+
+        # Scrollbars with modern styling
         self.job_v_scrollbar = ttk.Scrollbar(self.job_list_frame, orient="vertical", command=self.job_tree.yview)
         self.job_h_scrollbar = ttk.Scrollbar(self.job_list_frame, orient="horizontal", command=self.job_tree.xview)
 
         self.job_tree.configure(yscrollcommand=self.job_v_scrollbar.set, xscrollcommand=self.job_h_scrollbar.set)
 
         # Grid layout
-        self.job_tree.grid(row=0, column=0, sticky="nsew")
-        self.job_v_scrollbar.grid(row=0, column=1, sticky="ns")
-        self.job_h_scrollbar.grid(row=1, column=0, sticky="ew")
+        self.job_tree.pack(side="left", fill="both", expand=True)
+        self.job_v_scrollbar.pack(side="right", fill="y")
+        self.job_h_scrollbar.pack(side="bottom", fill="x")
 
-        # Context menu for jobs
-        self.job_context_menu = tk.Menu(self.job_tree, tearoff=0)
-        self.job_context_menu.add_command(label="Cancel Job", command=self._on_cancel_job)
-        self.job_context_menu.add_command(label="Retry Job", command=self._on_retry_job)
+        # Context menu for jobs with modern styling
+        self.job_context_menu = tk.Menu(self.job_tree, tearoff=0, bg='#2d2d2d', fg='#ffffff', 
+                                       activebackground='#007acc', activeforeground='#ffffff')
+        self.job_context_menu.add_command(label="❌ Cancel Job", command=self._on_cancel_job)
+        self.job_context_menu.add_command(label="🔄 Retry Job", command=self._on_retry_job)
         self.job_context_menu.add_separator()
-        self.job_context_menu.add_command(label="Show Details", command=self._on_show_job_details)
+        self.job_context_menu.add_command(label="👁️ Show Details", command=self._on_show_job_details)
+
+    def _create_stat_cards(self):
+        """Create modern stat cards"""
+        # Queue stat card
+        queue_card = ttk.LabelFrame(self.stats_frame, text="📋 Queue")
+        queue_card.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=2)
+        queue_card.columnconfigure(0, weight=1)
+        
+        self.queue_label = ttk.Label(queue_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.queue_label.grid(row=0, column=0, padx=10, pady=5)
+
+        # Processing stat card
+        processing_card = ttk.LabelFrame(self.stats_frame, text="⚡ Processing")
+        processing_card.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
+        processing_card.columnconfigure(0, weight=1)
+        
+        self.processing_label = ttk.Label(processing_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.processing_label.grid(row=0, column=0, padx=10, pady=5)
+
+        # Completed stat card
+        completed_card = ttk.LabelFrame(self.stats_frame, text="✅ Completed")
+        completed_card.grid(row=0, column=2, sticky="ew", padx=4, pady=2)
+        completed_card.columnconfigure(0, weight=1)
+        
+        self.completed_label = ttk.Label(completed_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.completed_label.grid(row=0, column=0, padx=10, pady=5)
+
+        # Failed stat card
+        failed_card = ttk.LabelFrame(self.stats_frame, text="❌ Failed")
+        failed_card.grid(row=0, column=3, sticky="ew", padx=4, pady=2)
+        failed_card.columnconfigure(0, weight=1)
+        
+        self.failed_label = ttk.Label(failed_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.failed_label.grid(row=0, column=0, padx=10, pady=5)
+
+        # Success rate stat card
+        success_card = ttk.LabelFrame(self.stats_frame, text="📊 Success Rate")
+        success_card.grid(row=0, column=4, sticky="ew", padx=(8, 0), pady=2)
+        success_card.columnconfigure(0, weight=1)
+        
+        self.success_rate_label = ttk.Label(success_card, text="0%", font=("Segoe UI", 16, "bold"))
+        self.success_rate_label.grid(row=0, column=0, padx=10, pady=5)
+
+        # Configure grid weights
+        for i in range(5):
+            self.stats_frame.columnconfigure(i, weight=1)
 
     def _setup_events(self):
         """Setup event handlers"""
@@ -162,19 +215,19 @@ class ProgressWidget:
         Args:
             status: Queue status
         """
-        # Update statistics labels
-        self.queue_label.config(text=f"Queue: {status.queue_size}")
-        self.processing_label.config(text=f"Processing: {status.processing_count}")
-        self.completed_label.config(text=f"Completed: {status.completed_count}")
-        self.failed_label.config(text=f"Failed: {status.failed_count}")
+        # Update statistics labels with modern cards
+        self.queue_label.config(text=str(status.queue_size))
+        self.processing_label.config(text=str(status.processing_count))
+        self.completed_label.config(text=str(status.completed_count))
+        self.failed_label.config(text=str(status.failed_count))
 
         # Calculate and update success rate
         total_finished = status.completed_count + status.failed_count
         if total_finished > 0:
             success_rate = (status.completed_count / total_finished) * 100
-            self.success_rate_label.config(text=f"Success: {success_rate:.1f}%")
+            self.success_rate_label.config(text=f"{success_rate:.1f}%")
         else:
-            self.success_rate_label.config(text="Success: 0%")
+            self.success_rate_label.config(text="0%")
 
         # Update overall progress
         if status.total_jobs > 0:
@@ -248,9 +301,9 @@ class ProgressWidget:
                 job_id, status = tags[0], tags[1]
 
                 # Update context menu based on status
-                self.job_context_menu.entryconfig("Cancel Job",
+                self.job_context_menu.entryconfig("❌ Cancel Job",
                                                  state="normal" if status in ["queued", "processing"] else "disabled")
-                self.job_context_menu.entryconfig("Retry Job",
+                self.job_context_menu.entryconfig("🔄 Retry Job",
                                                  state="normal" if status == "failed" else "disabled")
 
                 # Show context menu

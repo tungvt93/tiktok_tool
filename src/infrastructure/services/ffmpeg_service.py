@@ -1,15 +1,19 @@
 """
 FFmpeg Service Implementation
 
-Concrete implementation of video processing using FFmpeg.
+Concrete implementation of video processing using FFmpeg with GPU acceleration.
 """
 
 import subprocess
 import logging
 import threading
+import json
+import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from functools import lru_cache
+import tempfile
+import shutil
 
 from ...domain.entities.video import Video
 from ...domain.entities.processing_job import ProcessingJob
@@ -25,7 +29,7 @@ perf_logger = get_performance_logger()
 
 
 class FFmpegService(IVideoProcessor):
-    """FFmpeg-based video processor implementation"""
+    """FFmpeg-based video processor implementation with GPU acceleration"""
 
     def __init__(self, video_config: VideoProcessingConfig, ffmpeg_config: FFmpegConfig):
         """
@@ -38,44 +42,121 @@ class FFmpegService(IVideoProcessor):
         self.video_config = video_config
         self.ffmpeg_config = ffmpeg_config
         self._active_processes: Dict[str, subprocess.Popen] = {}
-        # Limit concurrent FFmpeg processes to prevent system overload
-        self._ffmpeg_semaphore = threading.Semaphore(2)  # Max 2 concurrent FFmpeg processes
+        
+        # Optimized concurrency - allow more concurrent processes based on CPU cores
+        import multiprocessing
+        max_concurrent = min(multiprocessing.cpu_count(), 4)  # Max 4 concurrent processes
+        self._ffmpeg_semaphore = threading.Semaphore(max_concurrent)
+        
+        # Initialize GPU detection
+        self._gpu_encoder = self._detect_gpu_encoder()
+        self._duration_cache_file = Path("temp/duration_cache.json")
+        self._duration_cache = self._load_duration_cache()
+        
+        # Create temp directory
+        self._temp_dir = Path("temp/ffmpeg_processing")
+        self._temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"FFmpegService initialized with GPU encoder: {self._gpu_encoder}")
+        logger.info(f"Max concurrent processes: {max_concurrent}")
+
+    def _detect_gpu_encoder(self) -> Optional[str]:
+        """Detect available GPU encoder"""
+        try:
+            # Test NVIDIA NVENC
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                 "-c:v", "h264_nvenc", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+            )
+            if result.returncode == 0:
+                return "h264_nvenc"
+        except:
+            pass
+
+        try:
+            # Test Intel QSV
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                 "-c:v", "h264_qsv", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+            )
+            if result.returncode == 0:
+                return "h264_qsv"
+        except:
+            pass
+
+        try:
+            # Test Apple VideoToolbox
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=1", 
+                 "-c:v", "h264_videotoolbox", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
+            )
+            if result.returncode == 0:
+                return "h264_videotoolbox"
+        except:
+            pass
+
+        return None
+
+    def _load_duration_cache(self) -> Dict[str, float]:
+        """Load video duration cache from file"""
+        try:
+            if self._duration_cache_file.exists():
+                with open(self._duration_cache_file, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load duration cache: {e}")
+        return {}
+
+    def _save_duration_cache(self) -> None:
+        """Save video duration cache to file"""
+        try:
+            self._duration_cache_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._duration_cache_file, 'w') as f:
+                json.dump(self._duration_cache, f)
+        except Exception as e:
+            logger.warning(f"Failed to save duration cache: {e}")
 
     def process_video(self, job: ProcessingJob) -> ProcessingResult:
-        """Process a video with effects using single-step processing for performance"""
+        """Process a video with effects using optimized single-step processing"""
         try:
             logger.info(f"Processing video: {job.main_video.path}")
             
-            # Check if we have effects that require dedicated processor
-            has_complex_effects = any(
-                effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
-                              EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW,
-                              EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT,
-                              EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]
-                for effect in job.effects
-            )
-            
-            if has_complex_effects:
-                # Use two-step processing for complex effects
-                logger.info("Complex effects detected - using two-step processing")
-                temp_output = job.output_path.with_suffix('.temp.mp4')
-                cmd = self._build_processing_command(job, temp_output)
-                if not self._run_ffmpeg_command(cmd, job.id):
-                    return ProcessingResult(False, error_message="FFmpeg processing failed")
+            # Create temporary directory for this job
+            with tempfile.TemporaryDirectory(dir=self._temp_dir) as temp_dir:
+                temp_path = Path(temp_dir)
                 
-                if self._has_opening_effects(job):
-                    success = self._apply_opening_effects(temp_output, job.output_path, job)
-                    temp_output.unlink()
-                    if not success:
-                        return ProcessingResult(False, error_message="Opening effects processing failed")
+                # Check if we have complex effects that require dedicated processor
+                has_complex_effects = any(
+                    effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                                  EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW,
+                                  EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT,
+                                  EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]
+                    for effect in job.effects
+                )
+                
+                if has_complex_effects:
+                    # Use two-step processing for complex effects
+                    logger.info("Complex effects detected - using two-step processing")
+                    temp_output = temp_path / "temp_output.mp4"
+                    cmd = self._build_optimized_processing_command(job, temp_output)
+                    if not self._run_ffmpeg_command(cmd, job.id):
+                        return ProcessingResult(False, error_message="FFmpeg processing failed")
+                    
+                    if self._has_opening_effects(job):
+                        success = self._apply_opening_effects(temp_output, job.output_path, job)
+                        if not success:
+                            return ProcessingResult(False, error_message="Opening effects processing failed")
+                    else:
+                        shutil.move(str(temp_output), str(job.output_path))
                 else:
-                    temp_output.rename(job.output_path)
-            else:
-                # Use single-step processing for better performance
-                cmd = self._build_single_step_command(job, job.output_path)
-                if not self._run_ffmpeg_command(cmd, job.id):
-                    return ProcessingResult(False, error_message="FFmpeg processing failed")
-            
+                    # Use optimized single-step processing for better performance
+                    cmd = self._build_optimized_single_step_command(job, job.output_path)
+                    if not self._run_ffmpeg_command(cmd, job.id):
+                        return ProcessingResult(False, error_message="FFmpeg processing failed")
+                
             logger.info(f"Video processing completed: {job.output_path}")
             return ProcessingResult(True, output_path=job.output_path)
             
@@ -233,8 +314,8 @@ class FFmpegService(IVideoProcessor):
             logger.error(f"Error cancelling job {job_id}: {e}")
             return False
 
-    def _build_single_step_command(self, job: ProcessingJob, output_path: Path) -> List[str]:
-        """Build single-step FFmpeg command combining all effects for performance"""
+    def _build_optimized_single_step_command(self, job: ProcessingJob, output_path: Path) -> List[str]:
+        """Build optimized single-step FFmpeg command with GPU acceleration"""
         from ...domain.value_objects.effect_type import EffectType
         
         cmd = ["ffmpeg", "-y"]
@@ -254,17 +335,17 @@ class FFmpegService(IVideoProcessor):
                     cmd.extend(["-i", str(gif_path)])
                     gif_inputs.append(gif_path)
         
-        # Build filter complex
+        # Build optimized filter complex
         filter_parts = []
         input_index = 0
         
-        # Scale main video to half width (like old logic)
-        filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}[left]")
+        # Scale main video to half width with optimized scaling
+        filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}:flags=lanczos[left]")
         input_index += 1
         
-        # Scale background video to half width (like old logic)
+        # Scale background video to half width with optimized scaling
         if job.background_video:
-            filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}[right]")
+            filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}:flags=lanczos[right]")
             input_index += 1
             # Horizontal stack like old logic
             filter_parts.append("[left][right]hstack=inputs=2[stacked]")
@@ -294,20 +375,28 @@ class FFmpegService(IVideoProcessor):
         if video_label != "[final]":
             filter_parts.append(f"{video_label}copy[final]")
         
-        # Build final command
+        # Build final command with GPU acceleration
         cmd.extend([
             "-filter_complex", ";".join(filter_parts),
             "-map", "[final]",
             "-map", "0:a",  # Include audio from first input
-            "-c:v", self.ffmpeg_config.codec_video,
+            "-c:v", self._gpu_encoder or self.ffmpeg_config.codec_video,
             "-c:a", "copy",  # Copy audio without re-encoding
-            "-preset", self.ffmpeg_config.preset,
+            "-preset", "fast" if self._gpu_encoder else self.ffmpeg_config.preset,
             "-crf", str(self.video_config.crf_value),
-            "-threads", self.ffmpeg_config.threads,
+            "-threads", "0",  # Use all available threads
             "-movflags", "+faststart+write_colr",
             "-shortest",
             str(output_path)
         ])
+        
+        # Add GPU-specific options
+        if self._gpu_encoder == "h264_nvenc":
+            cmd.extend(["-rc", "vbr", "-cq", "23", "-b:v", "5M", "-maxrate", "10M"])
+        elif self._gpu_encoder == "h264_qsv":
+            cmd.extend(["-global_quality", "23", "-look_ahead", "1"])
+        elif self._gpu_encoder == "h264_videotoolbox":
+            cmd.extend(["-allow_sw", "1", "-tag:v", "avc1"])
         
         return cmd
 
@@ -357,8 +446,8 @@ class FFmpegService(IVideoProcessor):
         
         return None
 
-    def _build_processing_command(self, job: ProcessingJob, temp_output: Path) -> List[str]:
-        """Build FFmpeg command for processing job"""
+    def _build_optimized_processing_command(self, job: ProcessingJob, temp_output: Path) -> List[str]:
+        """Build optimized FFmpeg command for processing job with GPU acceleration"""
         cmd = ["ffmpeg", "-y"]  # -y to overwrite output files
 
         # Input files
@@ -388,12 +477,12 @@ class FFmpegService(IVideoProcessor):
         # Build filter complex for video processing
         filter_parts = []
 
-        # Scale main video to half width (like old logic)
-        filter_parts.append(f"[0:v]scale={self.video_config.half_width}:{self.video_config.output_height}[left]")
+        # Scale main video to half width with optimized scaling
+        filter_parts.append(f"[0:v]scale={self.video_config.half_width}:{self.video_config.output_height}:flags=lanczos[left]")
 
-        # Scale background video to half width (like old logic)
+        # Scale background video to half width with optimized scaling
         if job.background_video:
-            filter_parts.append(f"[1:v]scale={self.video_config.half_width}:{self.video_config.output_height}[right]")
+            filter_parts.append(f"[1:v]scale={self.video_config.half_width}:{self.video_config.output_height}:flags=lanczos[right]")
             # Horizontal stack like old logic
             filter_parts.append("[left][right]hstack=inputs=2[stacked]")
             video_label = "[stacked]"
@@ -435,16 +524,24 @@ class FFmpegService(IVideoProcessor):
         # Audio mapping (from main video)
         cmd.extend(["-map", "0:a"])
 
-        # Encoding settings - optimized for performance and safety
+        # Optimized encoding settings with GPU acceleration
         cmd.extend([
-            "-c:v", self.ffmpeg_config.codec_video,
-            "-preset", "ultrafast",  # Use ultrafast for better performance
-            "-crf", "28",  # Slightly higher CRF for faster encoding
+            "-c:v", self._gpu_encoder or self.ffmpeg_config.codec_video,
+            "-preset", "fast" if self._gpu_encoder else "ultrafast",  # Use fast for GPU, ultrafast for CPU
+            "-crf", "28" if self._gpu_encoder else "28",  # Slightly higher CRF for faster encoding
             "-c:a", self.ffmpeg_config.codec_audio,
             "-threads", "0",  # Use all available threads
             "-shortest",  # Stop when shortest input ends (like old logic)
             "-movflags", "+faststart+write_colr"  # Optimize for streaming and add color info
         ])
+
+        # Add GPU-specific options
+        if self._gpu_encoder == "h264_nvenc":
+            cmd.extend(["-rc", "vbr", "-cq", "23", "-b:v", "5M", "-maxrate", "10M"])
+        elif self._gpu_encoder == "h264_qsv":
+            cmd.extend(["-global_quality", "23", "-look_ahead", "1"])
+        elif self._gpu_encoder == "h264_videotoolbox":
+            cmd.extend(["-allow_sw", "1", "-tag:v", "avc1"])
 
         # Output file
         cmd.append(str(temp_output))
@@ -819,10 +916,15 @@ class FFmpegService(IVideoProcessor):
                     del self._active_processes[job_id]
                 return False
 
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=256)  # Increased cache size
     def _get_video_duration(self, video_path: Path) -> Optional[float]:
-        """Get video duration using FFprobe"""
+        """Get video duration using cached FFprobe"""
         try:
+            # Check cache first
+            cache_key = str(video_path.absolute())
+            if cache_key in self._duration_cache:
+                return self._duration_cache[cache_key]
+
             cmd = [
                 "ffprobe", "-v", "error", "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)
@@ -837,15 +939,21 @@ class FFmpegService(IVideoProcessor):
                 timeout=10
             )
 
-            return float(result.stdout.strip())
+            duration = float(result.stdout.strip())
+            
+            # Cache the result
+            self._duration_cache[cache_key] = duration
+            self._save_duration_cache()
+            
+            return duration
 
         except Exception as e:
             logger.error(f"Failed to get duration for {video_path}: {e}")
             return None
 
-    @lru_cache(maxsize=128)
+    @lru_cache(maxsize=256)  # Increased cache size
     def _get_video_dimensions(self, video_path: Path) -> Optional[tuple]:
-        """Get video dimensions using FFprobe"""
+        """Get video dimensions using cached FFprobe"""
         try:
             cmd = [
                 "ffprobe", "-v", "error", "-select_streams", "v:0",

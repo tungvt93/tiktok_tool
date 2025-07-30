@@ -1,7 +1,7 @@
 """
 Processing Service
 
-Application service for managing video processing jobs and queue.
+Application service for managing video processing jobs and queue with concurrent processing.
 """
 
 import logging
@@ -11,6 +11,8 @@ import threading
 import queue
 import time
 from datetime import datetime
+import concurrent.futures
+import multiprocessing
 
 from ...domain.entities.processing_job import ProcessingJob
 from ...domain.entities.video import Video
@@ -44,7 +46,7 @@ class JobProgressCallback:
 
 
 class ProcessingService:
-    """Application service for processing job management"""
+    """Application service for processing job management with concurrent processing"""
 
     def __init__(self, video_processor: IVideoProcessor, config: AppConfig):
         """
@@ -64,14 +66,26 @@ class ProcessingService:
         self._is_processing = False
         self._callbacks: Dict[str, JobProgressCallback] = {}
 
+        # Concurrent processing
+        self._max_workers = min(multiprocessing.cpu_count(), 4)  # Max 4 concurrent workers
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self._max_workers,
+            thread_name_prefix="VideoProcessor"
+        )
+        self._active_futures: Dict[str, concurrent.futures.Future] = {}
+
         # Statistics
         self._stats = {
             'total_jobs': 0,
             'completed_jobs': 0,
             'failed_jobs': 0,
             'cancelled_jobs': 0,
-            'total_processing_time': 0.0
+            'total_processing_time': 0.0,
+            'concurrent_jobs': 0,
+            'max_concurrent_jobs': 0
         }
+
+        logger.info(f"ProcessingService initialized with {self._max_workers} concurrent workers")
 
     def submit_job(self, job: ProcessingJob,
                    callback: Optional[JobProgressCallback] = None) -> str:
@@ -170,6 +184,13 @@ class ProcessingService:
                 logger.warning(f"Cannot cancel job in terminal status: {job_id} ({job.status.value})")
                 return False
 
+            # Cancel future if running
+            if job_id in self._active_futures:
+                future = self._active_futures[job_id]
+                future.cancel()
+                del self._active_futures[job_id]
+                self._stats['concurrent_jobs'] -= 1
+
             # Try to cancel with video processor if processing
             if job.status == JobStatus.PROCESSING:
                 self.video_processor.cancel_processing(job_id)
@@ -206,7 +227,10 @@ class ProcessingService:
             'completed_count': len(completed_jobs),
             'failed_count': len(failed_jobs),
             'is_processing': self._is_processing,
-            'total_jobs': len(self._jobs)
+            'total_jobs': len(self._jobs),
+            'concurrent_jobs': self._stats['concurrent_jobs'],
+            'max_concurrent_jobs': self._stats['max_concurrent_jobs'],
+            'max_workers': self._max_workers
         }
 
     def get_statistics(self) -> Dict[str, Any]:
@@ -227,7 +251,8 @@ class ProcessingService:
             **self._stats,
             **queue_status,
             'average_processing_time': round(avg_processing_time, 2),
-            'success_rate': self._calculate_success_rate()
+            'success_rate': self._calculate_success_rate(),
+            'throughput': self._calculate_throughput()
         }
 
     def clear_completed_jobs(self) -> int:
@@ -262,6 +287,11 @@ class ProcessingService:
         try:
             self._is_processing = False
 
+            # Cancel all active futures
+            for job_id, future in list(self._active_futures.items()):
+                future.cancel()
+                logger.info(f"Cancelled active job: {job_id}")
+
             # Cancel all queued jobs
             queued_jobs = self.get_jobs_by_status(JobStatus.QUEUED)
             for job in queued_jobs:
@@ -270,6 +300,9 @@ class ProcessingService:
             # Wait for processing thread to finish
             if self._processing_thread and self._processing_thread.is_alive():
                 self._processing_thread.join(timeout=5.0)
+
+            # Shutdown executor
+            self._executor.shutdown(wait=True, timeout=5.0)
 
             logger.info("Processing service stopped")
 
@@ -289,28 +322,33 @@ class ProcessingService:
             logger.debug("Processing thread started")
 
     def _process_jobs(self) -> None:
-        """Main processing loop (runs in separate thread)"""
+        """Main processing loop with concurrent job execution"""
         logger.info("Processing thread started")
 
         while self._is_processing:
             try:
-                # Get next job from queue (with timeout)
-                try:
-                    job_id = self._job_queue.get(timeout=1.0)
-                except queue.Empty:
-                    continue
+                # Clean up completed futures
+                self._cleanup_completed_futures()
 
-                job = self._jobs.get(job_id)
-                if not job:
-                    logger.warning(f"Job not found in processing queue: {job_id}")
-                    continue
+                # Check if we can start more jobs
+                if len(self._active_futures) < self._max_workers:
+                    # Get next job from queue (with timeout)
+                    try:
+                        job_id = self._job_queue.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
 
-                # Skip if job was cancelled
-                if job.status == JobStatus.CANCELLED:
-                    continue
+                    job = self._jobs.get(job_id)
+                    if not job:
+                        logger.warning(f"Job not found in processing queue: {job_id}")
+                        continue
 
-                # Process the job
-                self._process_single_job(job)
+                    # Skip if job was cancelled
+                    if job.status == JobStatus.CANCELLED:
+                        continue
+
+                    # Start processing the job in a separate thread
+                    self._start_job_processing(job)
 
             except Exception as e:
                 logger.error(f"Error in processing loop: {e}")
@@ -318,16 +356,63 @@ class ProcessingService:
 
         logger.info("Processing thread stopped")
 
-    def _process_single_job(self, job: ProcessingJob) -> None:
-        """Process a single job"""
-        start_time = time.time()
-
+    def _start_job_processing(self, job: ProcessingJob) -> None:
+        """Start processing a job in a separate thread"""
         try:
-            logger.info(f"Starting job processing: {job.id}")
-
             # Update job status
             job.update_status(JobStatus.PROCESSING)
             self._notify_status_change(job.id, JobStatus.PROCESSING)
+
+            # Submit to thread pool
+            future = self._executor.submit(self._process_single_job, job)
+            self._active_futures[job.id] = future
+
+            # Update statistics
+            self._stats['concurrent_jobs'] += 1
+            self._stats['max_concurrent_jobs'] = max(
+                self._stats['max_concurrent_jobs'], 
+                self._stats['concurrent_jobs']
+            )
+
+            logger.info(f"Started processing job: {job.id} (concurrent: {self._stats['concurrent_jobs']})")
+
+        except Exception as e:
+            logger.error(f"Error starting job processing {job.id}: {e}")
+            job.update_status(JobStatus.FAILED, str(e))
+            self._notify_status_change(job.id, JobStatus.FAILED)
+            self._notify_complete(job.id, False)
+
+    def _cleanup_completed_futures(self) -> None:
+        """Clean up completed futures and update job status"""
+        completed_futures = []
+
+        for job_id, future in self._active_futures.items():
+            if future.done():
+                completed_futures.append(job_id)
+                self._stats['concurrent_jobs'] -= 1
+
+                # Handle future result
+                try:
+                    result = future.result(timeout=0.1)
+                    if result:
+                        logger.info(f"Job completed successfully: {job_id}")
+                    else:
+                        logger.error(f"Job failed: {job_id}")
+                except concurrent.futures.CancelledError:
+                    logger.info(f"Job was cancelled: {job_id}")
+                except Exception as e:
+                    logger.error(f"Error getting job result for {job_id}: {e}")
+
+        # Remove completed futures
+        for job_id in completed_futures:
+            del self._active_futures[job_id]
+
+    def _process_single_job(self, job: ProcessingJob) -> bool:
+        """Process a single job (runs in separate thread)"""
+        start_time = time.time()
+
+        try:
+            logger.info(f"Processing job: {job.id}")
 
             # Process video with timeout
             try:
@@ -338,7 +423,7 @@ class ProcessingService:
                 self._stats['failed_jobs'] += 1
                 self._notify_status_change(job.id, JobStatus.FAILED)
                 self._notify_complete(job.id, False)
-                return
+                return False
 
             processing_time = time.time() - start_time
 
@@ -363,6 +448,7 @@ class ProcessingService:
 
                 self._notify_status_change(job.id, JobStatus.COMPLETED)
                 self._notify_complete(job.id, True)
+                return True
 
             else:
                 # Job failed
@@ -373,6 +459,7 @@ class ProcessingService:
 
                 self._notify_status_change(job.id, JobStatus.FAILED)
                 self._notify_complete(job.id, False)
+                return False
 
         except Exception as e:
             # Unexpected error during processing
@@ -385,6 +472,7 @@ class ProcessingService:
 
             self._notify_status_change(job.id, JobStatus.FAILED)
             self._notify_complete(job.id, False)
+            return False
 
     def _notify_progress(self, job_id: str, progress: float) -> None:
         """Notify progress callback"""
@@ -419,3 +507,14 @@ class ProcessingService:
         if total_finished == 0:
             return 0.0
         return round((self._stats['completed_jobs'] / total_finished) * 100, 1)
+
+    def _calculate_throughput(self) -> float:
+        """Calculate jobs per minute throughput"""
+        if self._stats['total_processing_time'] == 0:
+            return 0.0
+        
+        total_time_hours = self._stats['total_processing_time'] / 3600
+        if total_time_hours == 0:
+            return 0.0
+            
+        return round(self._stats['completed_jobs'] / total_time_hours, 2)

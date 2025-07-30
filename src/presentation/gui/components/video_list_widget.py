@@ -30,55 +30,67 @@ class VideoListWidget:
         self._setup_events()
 
     def _create_widgets(self):
-        """Create widget components"""
-        # Main frame
-        self.frame = ttk.LabelFrame(self.parent, text="Video Selection")
+        """Create widget components with modern design"""
+        # Main frame with modern styling
+        self.frame = ttk.LabelFrame(self.parent, text="📁 Video Selection")
 
-        # Controls frame
+        # Controls frame with improved layout
         self.controls_frame = ttk.Frame(self.frame)
-        self.controls_frame.pack(fill="x", padx=5, pady=5)
+        self.controls_frame.pack(fill="x", padx=10, pady=8)
 
-        # Control buttons
-        self.select_all_btn = ttk.Button(self.controls_frame, text="Select All")
-        self.select_all_btn.pack(side="left", padx=(0, 5))
+        # Left side - Control buttons
+        left_controls = ttk.Frame(self.controls_frame)
+        left_controls.pack(side="left", fill="x", expand=True)
 
-        self.clear_selection_btn = ttk.Button(self.controls_frame, text="Clear Selection")
-        self.clear_selection_btn.pack(side="left", padx=(0, 5))
+        self.select_all_btn = ttk.Button(left_controls, text="✓ Select All")
+        self.select_all_btn.pack(side="left", padx=(0, 8))
 
-        self.refresh_btn = ttk.Button(self.controls_frame, text="Refresh")
+        self.clear_selection_btn = ttk.Button(left_controls, text="✗ Clear")
+        self.clear_selection_btn.pack(side="left", padx=(0, 8))
+
+        self.refresh_btn = ttk.Button(left_controls, text="🔄 Refresh")
         self.refresh_btn.pack(side="left")
 
-        # Search frame
+        # Right side - Search with modern design
         search_frame = ttk.Frame(self.controls_frame)
         search_frame.pack(side="right")
 
-        ttk.Label(search_frame, text="Search:").pack(side="left", padx=(0, 5))
+        ttk.Label(search_frame, text="🔍").pack(side="left", padx=(0, 8))
         self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=20)
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=25)
         self.search_entry.pack(side="left")
 
-        # List frame
+        # List frame with improved styling
         self.list_frame = ttk.Frame(self.frame)
-        self.list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.list_frame.pack(fill="both", expand=True, padx=10, pady=8)
 
         # Configure grid
         self.list_frame.rowconfigure(0, weight=1)
         self.list_frame.columnconfigure(0, weight=1)
 
-        # Treeview
+        # Treeview with modern styling and better columns
         columns = ("Name", "Duration", "Resolution", "Size", "Format", "Status")
-        self.tree = ttk.Treeview(self.list_frame, columns=columns, show="tree headings", selectmode="extended")
+        self.tree = ttk.Treeview(self.list_frame, columns=columns, show="tree headings", 
+                                selectmode="extended", height=15)
 
-        # Configure columns
+        # Configure columns with better widths and icons
         self.tree.heading("#0", text="☐")
-        self.tree.column("#0", width=30, minwidth=30, stretch=False)
+        self.tree.column("#0", width=40, minwidth=40, stretch=False)
 
-        column_widths = {"Name": 200, "Duration": 80, "Resolution": 100, "Size": 80, "Format": 60, "Status": 80}
-        for col in columns:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=column_widths.get(col, 100), minwidth=50)
+        column_configs = {
+            "Name": {"width": 250, "minwidth": 150, "text": "📄 Name"},
+            "Duration": {"width": 80, "minwidth": 60, "text": "⏱️ Duration"},
+            "Resolution": {"width": 100, "minwidth": 80, "text": "📐 Resolution"},
+            "Size": {"width": 80, "minwidth": 60, "text": "💾 Size"},
+            "Format": {"width": 60, "minwidth": 50, "text": "🎬 Format"},
+            "Status": {"width": 80, "minwidth": 60, "text": "📊 Status"}
+        }
 
-        # Scrollbars
+        for col, config in column_configs.items():
+            self.tree.heading(col, text=config["text"])
+            self.tree.column(col, width=config["width"], minwidth=config["minwidth"])
+
+        # Scrollbars with modern styling
         self.v_scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.tree.yview)
         self.h_scrollbar = ttk.Scrollbar(self.list_frame, orient="horizontal", command=self.tree.xview)
 
@@ -89,9 +101,9 @@ class VideoListWidget:
         self.v_scrollbar.grid(row=0, column=1, sticky="ns")
         self.h_scrollbar.grid(row=1, column=0, sticky="ew")
 
-        # Status label
+        # Status label with modern styling
         self.status_label = ttk.Label(self.frame, text="No videos loaded")
-        self.status_label.pack(fill="x", padx=5, pady=(0, 5))
+        self.status_label.pack(fill="x", padx=10, pady=(0, 8))
 
     def _setup_events(self):
         """Setup event handlers"""
@@ -174,7 +186,7 @@ class VideoListWidget:
             )
 
             # Insert item
-            item = self.tree.insert("", "end", values=values, tags=(video.path,))
+            item = self.tree.insert("", "end", values=values, tags=(video.path))
 
             # Set checkbox state (empty for now)
             self.tree.set(item, "#0", "☐")

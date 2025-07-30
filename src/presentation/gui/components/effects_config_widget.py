@@ -31,167 +31,200 @@ class EffectsConfigWidget:
         self._setup_events()
 
     def _create_widgets(self):
-        """Create widget components"""
-        # Main frame
-        self.frame = ttk.LabelFrame(self.parent, text="Effects Configuration")
+        """Create widget components with modern design"""
+        # Main frame with modern styling
+        self.frame = ttk.LabelFrame(self.parent, text="🎨 Effects Configuration")
 
-        # Notebook for different configuration modes
+        # Notebook for different configuration modes with improved styling
         self.notebook = ttk.Notebook(self.frame)
-        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Single effect tab
+        # Single effect tab with modern design
         self._create_single_effect_tab()
 
-        # Preset tab
+        # Preset tab with improved layout
         self._create_preset_tab()
 
-        # Random effects tab
+        # Random effects tab with better organization
         self._create_random_tab()
 
-        # Preview frame
+        # Preview frame with modern styling
         self._create_preview_frame()
 
     def _create_single_effect_tab(self):
-        """Create single effect configuration tab"""
+        """Create single effect configuration tab with modern design"""
         self.single_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.single_frame, text="Single Effect")
+        self.notebook.add(self.single_frame, text="🎯 Single Effect")
 
-        # Effect type selection
-        effect_frame = ttk.Frame(self.single_frame)
-        effect_frame.pack(fill="x", padx=5, pady=5)
+        # Effect type selection with improved layout
+        effect_frame = ttk.LabelFrame(self.single_frame, text="Effect Type")
+        effect_frame.pack(fill="x", padx=10, pady=8)
 
-        ttk.Label(effect_frame, text="Effect Type:").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        # Effect selection row
+        effect_select_frame = ttk.Frame(effect_frame)
+        effect_select_frame.pack(fill="x", padx=10, pady=8)
+        effect_select_frame.columnconfigure(1, weight=1)
+
+        ttk.Label(effect_select_frame, text="Type:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.effect_var = tk.StringVar(value="none")
-        self.effect_combo = ttk.Combobox(effect_frame, textvariable=self.effect_var, state="readonly", width=25)
-        self.effect_combo.grid(row=0, column=1, sticky="ew", padx=(0, 5))
-        effect_frame.columnconfigure(1, weight=1)
+        self.effect_combo = ttk.Combobox(effect_select_frame, textvariable=self.effect_var, 
+                                        state="readonly", width=25)
+        self.effect_combo.grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
-        # Effect info button
-        self.info_btn = ttk.Button(effect_frame, text="Info", width=8)
+        # Effect info button with icon
+        self.info_btn = ttk.Button(effect_select_frame, text="ℹ️ Info", width=8)
         self.info_btn.grid(row=0, column=2, padx=(5, 0))
 
-        # Duration configuration
-        duration_frame = ttk.Frame(self.single_frame)
-        duration_frame.pack(fill="x", padx=5, pady=5)
+        # Duration configuration with modern slider
+        duration_frame = ttk.LabelFrame(self.single_frame, text="Duration Settings")
+        duration_frame.pack(fill="x", padx=10, pady=8)
 
-        ttk.Label(duration_frame, text="Duration (s):").grid(row=0, column=0, sticky="w", padx=(0, 5))
+        duration_content = ttk.Frame(duration_frame)
+        duration_content.pack(fill="x", padx=10, pady=8)
+        duration_content.columnconfigure(2, weight=1)
+
+        ttk.Label(duration_content, text="Duration:").grid(row=0, column=0, sticky="w", padx=(0, 10))
         self.duration_var = tk.StringVar(value="2.0")
-        self.duration_spin = ttk.Spinbox(duration_frame, from_=0.1, to=10.0, increment=0.1,
+        self.duration_spin = ttk.Spinbox(duration_content, from_=0.1, to=10.0, increment=0.1,
                                         textvariable=self.duration_var, width=10)
-        self.duration_spin.grid(row=0, column=1, sticky="w", padx=(0, 5))
+        self.duration_spin.grid(row=0, column=1, sticky="w", padx=(0, 15))
 
-        # Duration scale
-        self.duration_scale = ttk.Scale(duration_frame, from_=0.1, to=10.0, orient="horizontal",
+        # Duration scale with better styling
+        self.duration_scale = ttk.Scale(duration_content, from_=0.1, to=10.0, orient="horizontal",
                                        variable=self.duration_var, length=200)
         self.duration_scale.grid(row=0, column=2, sticky="ew", padx=(5, 0))
-        duration_frame.columnconfigure(2, weight=1)
 
-        # Parameters frame (dynamic based on effect type)
-        self.params_frame = ttk.LabelFrame(self.single_frame, text="Parameters")
-        self.params_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # Parameters frame with modern design
+        self.params_frame = ttk.LabelFrame(self.single_frame, text="Effect Parameters")
+        self.params_frame.pack(fill="both", expand=True, padx=10, pady=8)
 
         self._param_widgets = {}
 
     def _create_preset_tab(self):
-        """Create preset configuration tab"""
+        """Create preset configuration tab with improved design"""
         self.preset_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.preset_frame, text="Presets")
+        self.notebook.add(self.preset_frame, text="📋 Presets")
 
-        # Preset selection
-        preset_select_frame = ttk.Frame(self.preset_frame)
-        preset_select_frame.pack(fill="x", padx=5, pady=5)
+        # Preset selection with modern layout
+        preset_select_frame = ttk.LabelFrame(self.preset_frame, text="Preset Selection")
+        preset_select_frame.pack(fill="x", padx=10, pady=8)
 
-        ttk.Label(preset_select_frame, text="Preset:").pack(side="left", padx=(0, 5))
+        preset_content = ttk.Frame(preset_select_frame)
+        preset_content.pack(fill="x", padx=10, pady=8)
+        preset_content.columnconfigure(1, weight=1)
+
+        ttk.Label(preset_content, text="Preset:").pack(side="left", padx=(0, 10))
         self.preset_var = tk.StringVar()
-        self.preset_combo = ttk.Combobox(preset_select_frame, textvariable=self.preset_var,
+        self.preset_combo = ttk.Combobox(preset_content, textvariable=self.preset_var,
                                         state="readonly", width=20)
-        self.preset_combo.pack(side="left", padx=(0, 5))
+        self.preset_combo.pack(side="left", padx=(0, 10))
 
-        # Preset info
-        self.preset_info_btn = ttk.Button(preset_select_frame, text="Info")
+        # Preset info button
+        self.preset_info_btn = ttk.Button(preset_content, text="ℹ️ Info")
         self.preset_info_btn.pack(side="left", padx=(5, 0))
 
-        # Preset description
-        self.preset_desc_label = ttk.Label(self.preset_frame, text="", wraplength=300)
-        self.preset_desc_label.pack(fill="x", padx=5, pady=5)
+        # Preset description with better styling
+        desc_frame = ttk.LabelFrame(self.preset_frame, text="Description")
+        desc_frame.pack(fill="x", padx=10, pady=8)
 
-        # Preset effects list
+        self.preset_desc_label = ttk.Label(desc_frame, text="", wraplength=350)
+        self.preset_desc_label.pack(fill="x", padx=10, pady=8)
+
+        # Preset effects list with modern design
         effects_list_frame = ttk.LabelFrame(self.preset_frame, text="Effects in Preset")
-        effects_list_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        effects_list_frame.pack(fill="both", expand=True, padx=10, pady=8)
 
-        # Listbox for preset effects
-        self.preset_effects_listbox = tk.Listbox(effects_list_frame, height=6)
+        # Listbox for preset effects with better styling
+        self.preset_effects_listbox = tk.Listbox(effects_list_frame, height=8, 
+                                                bg='#3d3d3d', fg='#ffffff', 
+                                                selectbackground='#007acc',
+                                                font=("Segoe UI", 9))
         preset_scrollbar = ttk.Scrollbar(effects_list_frame, orient="vertical",
                                         command=self.preset_effects_listbox.yview)
         self.preset_effects_listbox.configure(yscrollcommand=preset_scrollbar.set)
 
-        self.preset_effects_listbox.pack(side="left", fill="both", expand=True, padx=(5, 0), pady=5)
-        preset_scrollbar.pack(side="right", fill="y", padx=(0, 5), pady=5)
+        self.preset_effects_listbox.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        preset_scrollbar.pack(side="right", fill="y", padx=(0, 10), pady=10)
 
     def _create_random_tab(self):
-        """Create random effects configuration tab"""
+        """Create random effects configuration tab with modern design"""
         self.random_frame = ttk.Frame(self.notebook)
-        self.notebook.add(self.random_frame, text="Random")
+        self.notebook.add(self.random_frame, text="🎲 Random")
 
-        # Enable random effects
+        # Enable random effects with modern checkbox
+        enable_frame = ttk.LabelFrame(self.random_frame, text="Random Effects")
+        enable_frame.pack(fill="x", padx=10, pady=8)
+
         self.random_enabled_var = tk.BooleanVar()
-        random_check = ttk.Checkbutton(self.random_frame, text="Enable Random Effects",
+        random_check = ttk.Checkbutton(enable_frame, text="Enable Random Effects",
                                       variable=self.random_enabled_var)
-        random_check.pack(anchor="w", padx=5, pady=5)
+        random_check.pack(anchor="w", padx=10, pady=8)
 
-        # Random configuration frame
+        # Random configuration frame with improved layout
         self.random_config_frame = ttk.LabelFrame(self.random_frame, text="Random Configuration")
-        self.random_config_frame.pack(fill="x", padx=5, pady=5)
+        self.random_config_frame.pack(fill="x", padx=10, pady=8)
 
-        # Duration range
-        duration_range_frame = ttk.Frame(self.random_config_frame)
-        duration_range_frame.pack(fill="x", padx=5, pady=5)
+        # Duration range with modern layout
+        duration_range_frame = ttk.LabelFrame(self.random_config_frame, text="Duration Range")
+        duration_range_frame.pack(fill="x", padx=10, pady=8)
 
-        ttk.Label(duration_range_frame, text="Duration Range:").grid(row=0, column=0, sticky="w")
+        duration_content = ttk.Frame(duration_range_frame)
+        duration_content.pack(fill="x", padx=10, pady=8)
+        duration_content.columnconfigure(2, weight=1)
+        duration_content.columnconfigure(4, weight=1)
 
-        ttk.Label(duration_range_frame, text="Min:").grid(row=0, column=1, sticky="w", padx=(10, 5))
+        ttk.Label(duration_content, text="Min:").grid(row=0, column=0, sticky="w", padx=(0, 5))
         self.min_duration_var = tk.StringVar(value="0.5")
-        min_spin = ttk.Spinbox(duration_range_frame, from_=0.1, to=5.0, increment=0.1,
+        min_spin = ttk.Spinbox(duration_content, from_=0.1, to=5.0, increment=0.1,
                               textvariable=self.min_duration_var, width=8)
-        min_spin.grid(row=0, column=2, sticky="w", padx=(0, 10))
+        min_spin.grid(row=0, column=1, sticky="w", padx=(0, 20))
 
-        ttk.Label(duration_range_frame, text="Max:").grid(row=0, column=3, sticky="w", padx=(0, 5))
+        ttk.Label(duration_content, text="Max:").grid(row=0, column=2, sticky="w", padx=(0, 5))
         self.max_duration_var = tk.StringVar(value="3.0")
-        max_spin = ttk.Spinbox(duration_range_frame, from_=0.5, to=10.0, increment=0.1,
+        max_spin = ttk.Spinbox(duration_content, from_=0.5, to=10.0, increment=0.1,
                               textvariable=self.max_duration_var, width=8)
-        max_spin.grid(row=0, column=4, sticky="w")
+        max_spin.grid(row=0, column=3, sticky="w")
 
-        # Effect categories
+        # Effect categories with modern checkboxes
         categories_frame = ttk.LabelFrame(self.random_config_frame, text="Effect Categories")
-        categories_frame.pack(fill="x", padx=5, pady=5)
+        categories_frame.pack(fill="x", padx=10, pady=8)
+
+        categories_content = ttk.Frame(categories_frame)
+        categories_content.pack(fill="x", padx=10, pady=8)
 
         self.category_vars = {}
-        categories = ["Slide", "Circle", "Fade", "Other"]
+        categories = [
+            ("Slide", "📱"),
+            ("Circle", "⭕"), 
+            ("Fade", "🌅"),
+            ("Other", "✨")
+        ]
 
-        for i, category in enumerate(categories):
+        for i, (category, icon) in enumerate(categories):
             var = tk.BooleanVar(value=True)
             self.category_vars[category] = var
-            check = ttk.Checkbutton(categories_frame, text=category, variable=var)
-            check.grid(row=i//2, column=i%2, sticky="w", padx=5, pady=2)
+            check = ttk.Checkbutton(categories_content, text=f"{icon} {category}", 
+                                   variable=var)
+            check.grid(row=i//2, column=i%2, sticky="w", padx=10, pady=5)
 
     def _create_preview_frame(self):
-        """Create preview frame"""
-        preview_frame = ttk.LabelFrame(self.frame, text="Preview")
-        preview_frame.pack(fill="x", padx=5, pady=5)
+        """Create preview frame with modern styling"""
+        preview_frame = ttk.LabelFrame(self.frame, text="👁️ Preview & Estimation")
+        preview_frame.pack(fill="x", padx=10, pady=8)
 
-        # Preview controls
+        # Preview controls with modern buttons
         controls_frame = ttk.Frame(preview_frame)
-        controls_frame.pack(fill="x", padx=5, pady=5)
+        controls_frame.pack(fill="x", padx=10, pady=8)
 
-        self.preview_btn = ttk.Button(controls_frame, text="Preview Effect")
-        self.preview_btn.pack(side="left", padx=(0, 5))
+        self.preview_btn = ttk.Button(controls_frame, text="👁️ Preview Effect")
+        self.preview_btn.pack(side="left", padx=(0, 10))
 
-        self.estimate_btn = ttk.Button(controls_frame, text="Estimate Time")
+        self.estimate_btn = ttk.Button(controls_frame, text="⏱️ Estimate Time")
         self.estimate_btn.pack(side="left")
 
-        # Estimate label
+        # Estimate label with better styling
         self.estimate_label = ttk.Label(preview_frame, text="")
-        self.estimate_label.pack(fill="x", padx=5, pady=(0, 5))
+        self.estimate_label.pack(fill="x", padx=10, pady=(0, 8))
 
     def _setup_events(self):
         """Setup event handlers"""
@@ -252,11 +285,11 @@ class EffectsConfigWidget:
         """
         current_tab = self.notebook.tab(self.notebook.select(), "text")
 
-        if current_tab == "Single Effect":
+        if current_tab == "🎯 Single Effect":
             return self._get_single_effect_config()
-        elif current_tab == "Presets":
+        elif current_tab == "📋 Presets":
             return self._get_preset_config()
-        elif current_tab == "Random":
+        elif current_tab == "🎲 Random":
             return self._get_random_config()
 
         return {"mode": "none"}
