@@ -165,10 +165,11 @@ class MainWindowView(BaseView):
 
     def show_loading_animation(self, message="Processing..."):
         """Show loading animation with modern design"""
-        # Create loading overlay
-        if hasattr(self, 'loading_overlay'):
-            self.loading_overlay.destroy()
+        # Prevent multiple loading overlays
+        if hasattr(self, 'loading_overlay') and self.loading_overlay.winfo_exists():
+            return
             
+        # Create loading overlay
         self.loading_overlay = tk.Toplevel(self.root)
         self.loading_overlay.title("")
         self.loading_overlay.geometry("300x150")
@@ -198,16 +199,30 @@ class MainWindowView(BaseView):
         
     def _animate_spinner(self, spinner_label, frame=0):
         """Animate loading spinner"""
-        spinner_chars = ["⏳", "⏰", "⏱️", "⏲️"]
-        spinner_label.config(text=spinner_chars[frame % len(spinner_chars)])
-        if hasattr(self, 'loading_overlay') and self.loading_overlay.winfo_exists():
-            self.root.after(200, lambda: self._animate_spinner(spinner_label, frame + 1))
+        try:
+            # Check if spinner label and loading overlay still exist
+            if (hasattr(self, 'loading_overlay') and 
+                self.loading_overlay.winfo_exists() and 
+                spinner_label.winfo_exists()):
+                
+                spinner_chars = ["⏳", "⏰", "⏱️", "⏲️"]
+                spinner_label.config(text=spinner_chars[frame % len(spinner_chars)])
+                
+                # Schedule next animation frame
+                self.root.after(200, lambda: self._animate_spinner(spinner_label, frame + 1))
+        except tk.TclError:
+            # Widget was destroyed, stop animation
+            pass
             
     def hide_loading_animation(self):
         """Hide loading animation"""
-        if hasattr(self, 'loading_overlay'):
-            self.loading_overlay.destroy()
-            delattr(self, 'loading_overlay')
+        try:
+            if hasattr(self, 'loading_overlay'):
+                self.loading_overlay.destroy()
+                delattr(self, 'loading_overlay')
+        except tk.TclError:
+            # Widget already destroyed
+            pass
 
     def show_success_notification(self, message, duration=3000):
         """Show success notification with modern design"""
