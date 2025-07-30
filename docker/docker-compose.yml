@@ -1,0 +1,100 @@
+version: "3.8"
+
+services:
+  # Main application service
+  tiktok-processor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: tiktok-video-processor:2.0.0
+    container_name: tiktok-video-processor
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    command: python main.py --cli list
+    restart: unless-stopped
+
+  # Batch processing service
+  batch-processor:
+    image: tiktok-video-processor:2.0.0
+    container_name: tiktok-batch-processor
+    volumes:
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    profiles:
+      - batch
+    command: >
+      sh -c "
+        for input_file in /app/input/*.mp4; do
+          if [ -f \"$$input_file\" ]; then
+            filename=$$(basename \"$$input_file\" .mp4)
+            python main.py --cli process \"$$input_file\" \"/app/input/background.mp4\" \
+              -o \"/app/output/processed_$$filename.mp4\" \
+              -e fade_in -d 2.0
+          fi
+        done
+      "
+    restart: "no"
+
+  # Configuration service
+  config-manager:
+    image: tiktok-video-processor:2.0.0
+    container_name: tiktok-config-manager
+    volumes:
+      - ./config:/app/config
+    environment:
+      - LOG_LEVEL=INFO
+    profiles:
+      - config
+    command: python main.py --cli config show
+    restart: "no"
+
+  # Development service with hot reload
+  dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: builder
+    image: tiktok-video-processor:dev
+    container_name: tiktok-dev
+    volumes:
+      - ..:/app
+      - ./input:/app/input
+      - ./output:/app/output
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    profiles:
+      - dev
+    command: python main.py --debug
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+# Named volumes for persistent data
+volumes:
+  input_data:
+    driver: local
+  output_data:
+    driver: local
+  config_data:
+    driver: local
+  logs_data:
+    driver: local
+
+# Networks
+networks:
+  default:
+    name: tiktok-processor-network

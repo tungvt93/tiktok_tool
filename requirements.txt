@@ -1,5 +1,29 @@
-Pillow>=9.0.0
-numpy>=1.21.0
-opencv-python>=4.5.0
-PyQt5>=5.15.0
-opencv-contrib-python>=4.5.0
+# TikTok Video Processing Tool - Dependencies
+
+# Core dependencies
+pathlib2>=2.3.0; python_version < '3.4'
+
+# Testing dependencies
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+numpy
+Pillow
+
+# Development dependencies
+black>=22.0.0
+flake8>=5.0.0
+mypy>=1.0.0
+
+# Optional GUI dependencies (usually included with Python)
+# tkinter - included with most Python installations
+
+# Note: FFmpeg is required but must be installed separately
+# Installation instructions:
+# - Windows: Download from https://ffmpeg.org/download.html
+# - macOS: brew install ffmpeg
+# - Ubuntu/Debian: sudo apt-get install ffmpeg
+# - CentOS/RHEL: sudo yum install ffmpeg
+
+# For development and testing
+coverage>=7.0.0
