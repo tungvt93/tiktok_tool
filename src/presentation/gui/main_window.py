@@ -376,21 +376,21 @@ class MainWindowView(BaseView):
         columns = ("Name", "Duration", "Size", "Status")
         self.video_tree = ttk.Treeview(list_frame, columns=columns, show="tree headings", height=15)
 
-        # Configure columns with better widths
+        # Configure columns with better widths and alignment
         self.video_tree.heading("#0", text="☐")
         self.video_tree.column("#0", width=40, minwidth=40, stretch=False)
 
         column_configs = {
-            "Name": {"width": 250, "minwidth": 150},
-            "Duration": {"width": 80, "minwidth": 60},
-            "Size": {"width": 80, "minwidth": 60},
-            "Status": {"width": 80, "minwidth": 60}
+            "Name": {"width": 250, "minwidth": 150, "anchor": "w"},  # Left align
+            "Duration": {"width": 80, "minwidth": 60, "anchor": "center"},  # Center align
+            "Size": {"width": 80, "minwidth": 60, "anchor": "center"},  # Center align
+            "Status": {"width": 80, "minwidth": 60, "anchor": "center"}  # Center align
         }
 
         for col in columns:
             self.video_tree.heading(col, text=col)
-            config = column_configs.get(col, {"width": 100, "minwidth": 50})
-            self.video_tree.column(col, width=config["width"], minwidth=config["minwidth"])
+            config = column_configs.get(col, {"width": 100, "minwidth": 50, "anchor": "w"})
+            self.video_tree.column(col, width=config["width"], minwidth=config["minwidth"], anchor=config["anchor"])
 
         # Scrollbars with modern styling
         v_scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.video_tree.yview)
@@ -500,17 +500,17 @@ class MainWindowView(BaseView):
         queue_columns = ("Video", "Status", "Progress", "Time")
         self.queue_tree = ttk.Treeview(queue_frame, columns=queue_columns, show="headings", height=6)
 
-        # Configure columns with better headers and widths
+        # Configure columns with better headers, widths and alignment
         column_configs = [
-            ("Video", "🎬 Video", 200),
-            ("Status", "📊 Status", 120),
-            ("Progress", "📈 Progress", 150),
-            ("Time", "⏱️ Time", 100)
+            ("Video", "🎬 Video", 200, "w"),  # Left align
+            ("Status", "📊 Status", 120, "center"),  # Center align
+            ("Progress", "📈 Progress", 150, "center"),  # Center align
+            ("Time", "⏱️ Time", 100, "center")  # Center align
         ]
         
-        for col, header, width in column_configs:
+        for col, header, width, anchor in column_configs:
             self.queue_tree.heading(col, text=header)
-            self.queue_tree.column(col, width=width, minwidth=80)
+            self.queue_tree.column(col, width=width, minwidth=80, anchor=anchor)
 
         # Scrollbar for queue
         queue_scrollbar = ttk.Scrollbar(queue_frame, orient="vertical", command=self.queue_tree.yview)
@@ -632,22 +632,26 @@ class MainWindowView(BaseView):
                  background=[("active", "#218838"),
                            ("pressed", "#1e7e34")])
         
-        # Treeview styling with better contrast
+        # Treeview styling with better contrast and borders
         style.configure("Treeview",
                        background=colors['bg_tertiary'],
                        foreground=colors['text_primary'],
                        fieldbackground=colors['bg_tertiary'],
-                       rowheight=25)
+                       rowheight=25,
+                       borderwidth=1,
+                       relief="solid")
         
         style.configure("Treeview.Heading",
                        background=colors['accent_primary'],
                        foreground=colors['text_primary'],
-                       relief="flat")
+                       relief="solid",
+                       borderwidth=1)
         
         # Better hover effect for treeview headings
         style.map("Treeview.Heading",
                  background=[("active", colors['accent_secondary'])])
         
+        # Treeview row borders
         style.map("Treeview",
                  background=[("selected", colors['accent_primary'])],
                  foreground=[("selected", colors['text_primary'])])
@@ -1419,17 +1423,7 @@ class MainWindowPresenter(BasePresenter):
                         )
                         effects.append(effect)
 
-                # Add GIF effect
-                gif_path = self._get_selected_gif_path()
-                if gif_path:
-                    # Create a GIF overlay effect (use video duration or default to 10 seconds)
-                    gif_duration = video_dto.duration if video_dto.duration > 0 else 10.0
-                    gif_effect = Effect(
-                        type=EffectType.GIF_OVERLAY,
-                        duration=gif_duration,  # Use video duration for GIF overlay
-                        parameters={'gif_path': str(gif_path)}
-                    )
-                    effects.append(gif_effect)
+
 
                 # Create processing job
                 job = ProcessingJob(
@@ -1517,25 +1511,4 @@ class MainWindowPresenter(BasePresenter):
         except Exception as e:
             logger.error(f"Error handling job completion: {e}")
 
-    def _get_selected_gif_path(self) -> Optional[Path]:
-        """Get the path to the selected GIF effect"""
-        try:
-            if self.view.is_random_gif_enabled():
-                # Select random GIF
-                import glob
-                from pathlib import Path
-                effects_dir = self.config.paths.effects_dir if hasattr(self.config.paths, 'effects_dir') else Path("effects")
-                gif_files = glob.glob(str(effects_dir / "*.gif"))
-                if gif_files:
-                    import random
-                    return Path(random.choice(gif_files))
-            else:
-                # Get selected GIF
-                selected_gif = self.view.get_selected_gif()
-                if selected_gif != "none":
-                    effects_dir = self.config.paths.effects_dir if hasattr(self.config.paths, 'effects_dir') else Path("effects")
-                    return effects_dir / selected_gif
-            return None
-        except Exception as e:
-            logger.error(f"Error getting selected GIF path: {e}")
-            return None
+

@@ -19,7 +19,6 @@ class EffectType(Enum):
     CIRCLE_ROTATE_CW = "circle_rotate_cw"
     CIRCLE_ROTATE_CCW = "circle_rotate_ccw"
     FADE_IN = "fade_in"
-    GIF_OVERLAY = "gif_overlay"
 
     @classmethod
     def get_slide_effects(cls) -> list['EffectType']:

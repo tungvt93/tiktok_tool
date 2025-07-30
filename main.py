@@ -64,7 +64,7 @@ class ApplicationFactory:
         from src.infrastructure.repositories.video_repository import VideoRepository
         from src.infrastructure.processors import (
             SlideEffectProcessor, CircleEffectProcessor,
-            FadeEffectProcessor, GIFProcessor, GIFOverlayProcessor
+            FadeEffectProcessor, GIFProcessor
         )
 
         # Register core infrastructure services
@@ -85,8 +85,7 @@ class ApplicationFactory:
             SlideEffectProcessor(self.config.ffmpeg),
             CircleEffectProcessor(self.config.ffmpeg),
             FadeEffectProcessor(self.config.ffmpeg),
-            GIFProcessor(self.config.paths),
-            GIFOverlayProcessor(self.config.ffmpeg, self.config.paths)
+            GIFProcessor(self.config.paths)
         ]
 
         # Store effect processors for later use

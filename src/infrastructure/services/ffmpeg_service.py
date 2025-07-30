@@ -183,7 +183,7 @@ class FFmpegService(IVideoProcessor):
             
         except Exception as e:
             logger.error(f"Error processing video {job.main_video.path}: {e}")
-            return ProcessingResult.failure(str(e))
+            return ProcessingResult(False, error_message=str(e))
 
     def get_video_info(self, video_path: Path) -> Optional[VideoInfo]:
         """
@@ -347,14 +347,7 @@ class FFmpegService(IVideoProcessor):
         if job.background_video:
             cmd.extend(["-i", str(job.background_video.path)])
         
-        # Add GIF inputs
-        gif_inputs = []
-        for effect in job.effects:
-            if effect.type == EffectType.GIF_OVERLAY:
-                gif_path = self._get_or_create_tiled_gif(Path(effect.get_parameter('gif_path')))
-                if gif_path:
-                    cmd.extend(["-i", str(gif_path)])
-                    gif_inputs.append(gif_path)
+
         
         # Build optimized filter complex
         filter_parts = []
@@ -374,23 +367,15 @@ class FFmpegService(IVideoProcessor):
         else:
             video_label = "[left]"
         
-        # Apply GIF overlays
-        for effect in job.effects:
-            if effect.type == EffectType.GIF_OVERLAY:
-                gif_filter = self._build_gif_overlay_filter_single_step(effect, video_label, f"[gif_{input_index}]", input_index)
-                if gif_filter:
-                    filter_parts.append(gif_filter)
-                    video_label = f"[gif_{input_index}]"
-                input_index += 1
+
         
         # Apply opening effects (fade, slide, circle)
         for effect in job.effects:
-            if effect.type != EffectType.GIF_OVERLAY:
-                effect_filter = self._build_opening_effect_filter_single_step(effect, video_label, "[final]")
-                if effect_filter:
-                    filter_parts.append(effect_filter)
-                    video_label = "[final]"
-                    break  # Only apply first opening effect like old logic
+            effect_filter = self._build_opening_effect_filter_single_step(effect, video_label, "[final]")
+            if effect_filter:
+                filter_parts.append(effect_filter)
+                video_label = "[final]"
+                break  # Only apply first opening effect like old logic
         
         # If no opening effects, just copy the video
         if video_label != "[final]":
@@ -421,28 +406,7 @@ class FFmpegService(IVideoProcessor):
         
         return cmd
 
-    def _build_gif_overlay_filter_single_step(self, effect, input_label: str, output_label: str, gif_input_index: int) -> Optional[str]:
-        """Build GIF overlay filter for single-step processing"""
-        from ...domain.value_objects.effect_type import EffectType
 
-        if effect.type == EffectType.GIF_OVERLAY:
-            # Get parameters
-            x_pos = effect.get_parameter('x', 10)
-            y_pos = effect.get_parameter('y', 10)
-            scale = effect.get_parameter('scale', 1.0)
-
-            # Build overlay filter
-            gif_stream = f"[{gif_input_index}:v]"
-            
-            # Scale the GIF if needed
-            if scale != 1.0:
-                scale_filter = f"{gif_stream}scale=iw*{scale}:ih*{scale}[gif_scaled]"
-                overlay_filter = f"{input_label}[gif_scaled]overlay={x_pos}:{y_pos}{output_label}"
-                return f"{scale_filter};{overlay_filter}"
-            else:
-                return f"{input_label}{gif_stream}overlay={x_pos}:{y_pos}{output_label}"
-
-        return None
 
     def _build_opening_effect_filter_single_step(self, effect, input_label: str, output_label: str) -> Optional[str]:
         """Build opening effect filter for single-step processing"""
@@ -476,24 +440,7 @@ class FFmpegService(IVideoProcessor):
         if job.background_video:
             cmd.extend(["-i", str(job.background_video.path)])
 
-        # Add GIF inputs for GIF overlay effects
-        from ...domain.value_objects.effect_type import EffectType
-        gif_inputs = []
-        for effect in job.effects:
-            if effect.type == EffectType.GIF_OVERLAY:
-                gif_path = effect.get_parameter('gif_path')
-                if gif_path:
-                    # Try to get or create tiled GIF
-                    tiled_gif_path = self._get_or_create_tiled_gif(Path(gif_path))
-                    if tiled_gif_path:
-                        cmd.extend(["-i", str(tiled_gif_path)])
-                        gif_inputs.append(str(tiled_gif_path))
-                        logger.info(f"Using tiled GIF: {tiled_gif_path}")
-                    else:
-                        # Fallback to original GIF
-                        cmd.extend(["-i", str(gif_path)])
-                        gif_inputs.append(gif_path)
-                        logger.warning(f"Using original GIF (tiled creation failed): {gif_path}")
+
 
         # Build filter complex for video processing
         filter_parts = []
@@ -512,26 +459,17 @@ class FFmpegService(IVideoProcessor):
 
         # Apply effects if any
         if job.effects:
-            gif_input_index = 2 if job.background_video else 1  # Start after main video (0) and background video (1)
             for i, effect in enumerate(job.effects):
-                if effect.type == EffectType.GIF_OVERLAY:
-                    # Handle GIF overlay effect
-                    effect_filter = self._build_gif_overlay_filter(effect, video_label, f"[effect{i}]", gif_input_index)
-                    if effect_filter:
+                # Handle effects
+                effect_filter = self._build_effect_filter(effect, video_label, f"[effect{i}]")
+                if effect_filter:
+                    # Skip circle effects for now to avoid syntax errors
+                    if effect.type not in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                                         EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
                         filter_parts.append(effect_filter)
                         video_label = f"[effect{i}]"
-                        gif_input_index += 1
-                else:
-                    # Handle other effects
-                    effect_filter = self._build_effect_filter(effect, video_label, f"[effect{i}]")
-                    if effect_filter:
-                        # Skip circle effects for now to avoid syntax errors
-                        if effect.type not in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
-                                             EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
-                            filter_parts.append(effect_filter)
-                            video_label = f"[effect{i}]"
-                        else:
-                            logger.warning(f"Skipping circle effect {effect.type} to avoid syntax errors")
+                    else:
+                        logger.warning(f"Skipping circle effect {effect.type} to avoid syntax errors")
 
         # Combine all filters
         if filter_parts:
@@ -570,20 +508,16 @@ class FFmpegService(IVideoProcessor):
         return cmd
 
     def _has_opening_effects(self, job: ProcessingJob) -> bool:
-        """Check if job has opening effects (non-GIF effects)"""
-        from ...domain.value_objects.effect_type import EffectType
-        for effect in job.effects:
-            if effect.type != EffectType.GIF_OVERLAY:
-                return True
-        return False
+        """Check if job has opening effects"""
+        return len(job.effects) > 0
 
     def _apply_opening_effects(self, input_video: Path, output_video: Path, job: ProcessingJob) -> bool:
         """Apply opening effects to video (like old logic)"""
         try:
             from ...domain.value_objects.effect_type import EffectType
             
-            # Find opening effects (non-GIF effects)
-            opening_effects = [effect for effect in job.effects if effect.type != EffectType.GIF_OVERLAY]
+            # Find opening effects
+            opening_effects = job.effects
             
             if not opening_effects:
                 # No opening effects, just copy
@@ -781,64 +715,12 @@ class FFmpegService(IVideoProcessor):
             # Circle effects are now handled by dedicated processor in _apply_opening_effects
             # Return None to skip in first pass
             return None
-        elif effect.type == EffectType.GIF_OVERLAY:
-            # GIF overlay effect - this will be handled differently in the main command building
-            # For now, return None as GIF overlays require additional input streams
-            return None
+
         # Add more effect filters as needed
 
         return None
 
-    def _build_gif_overlay_filter(self, effect, input_label: str, output_label: str, gif_input_index: int) -> Optional[str]:
-        """Build FFmpeg filter for GIF overlay effect"""
-        from ...domain.value_objects.effect_type import EffectType
 
-        if effect.type == EffectType.GIF_OVERLAY:
-            # Get parameters
-            x_pos = effect.get_parameter('x', 10)  # Default to 10 pixels from left
-            y_pos = effect.get_parameter('y', 10)  # Default to 10 pixels from top
-            scale = effect.get_parameter('scale', 1.0)  # Default scale
-
-            # Build overlay filter - use simple overlay like old logic
-            # input_label is the video stream, [gif_input_index:v] is the GIF stream
-            gif_stream = f"[{gif_input_index}:v]"
-            
-            # Scale the GIF if needed (no loop, let FFmpeg handle it naturally)
-            if scale != 1.0:
-                scale_filter = f"{gif_stream}scale=iw*{scale}:ih*{scale}[gif_scaled]"
-                overlay_filter = f"{input_label}[gif_scaled]overlay={x_pos}:{y_pos}{output_label}"
-                return f"{scale_filter};{overlay_filter}"
-            else:
-                return f"{input_label}{gif_stream}overlay={x_pos}:{y_pos}{output_label}"
-
-        return None
-
-    def _get_or_create_tiled_gif(self, gif_path: Path) -> Optional[Path]:
-        """Get existing tiled GIF or create new one"""
-        try:
-            from ...domain.value_objects.dimensions import Dimensions
-            from ...infrastructure.processors.gif_processor import GIFProcessor
-            from ...shared.config import PathConfig
-            
-            # Create a temporary path config for GIF processor
-            path_config = PathConfig(
-                effects_dir=Path("effects"),
-                generated_effects_dir=Path("generated_effects"),
-                output_dir=Path("output"),
-                temp_dir=Path("temp")
-            )
-            
-            gif_processor = GIFProcessor(path_config)
-            tiled_gif_path = gif_processor.get_or_create_tiled_gif(
-                video_path=Path("temp"),  # Dummy path
-                original_gif_path=gif_path
-            )
-            
-            return tiled_gif_path
-            
-        except Exception as e:
-            logger.warning(f"Failed to create tiled GIF for {gif_path}: {e}")
-            return None
 
     def _validate_output_file(self, output_path: Path) -> bool:
         """Validate that output file is complete and playable"""
