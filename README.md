@@ -20,6 +20,21 @@ This project is a Python3 script that allows you to automatically upload and sch
 
 The script is easy to use and requires minimal setup. Simply provide your TikTok *sessionid* cookie, the video file you wish to upload and the video details, and the script will handle the rest. You can also schedule videos to be uploaded at a specific time, making it easy to plan your content in advance.
 
+### 🎬 NEW: Video Processing with Opening Effects
+
+The project now includes an advanced video processing tool (`main.py`) that can:
+
+- **Merge videos** with background loops
+- **Add GIF overlay effects** 
+- **Apply opening effects** including:
+  - Slide effects (right-to-left, left-to-right, top-to-bottom, bottom-to-top)
+  - Circle effects (expand, contract, rotate clockwise/counter-clockwise)
+  - Fade-in effects
+- **Process videos in parallel** for faster rendering
+- **Optimize video quality** with configurable settings
+
+See [README_EFFECTS.md](README_EFFECTS.md) for detailed information about the video processing features.
+
 ## Getting Started
 To get started you need to have python3 installed. If it is not the case you can download it here : https://www.python.org/downloads/<br><br>
 You will also need your TikTok ***sessionid* cookie**. To get it log in to your TikTok account and on the page https://www.tiktok.com/ press the F12 key on your keyboard then Application > Storage > Cookies and find the value of the *sessionid* cookie. You should have something like this: `7a9f3c5d8f6e4b2a1c9d8e7f6a5b4c3d` <br><br>
@@ -31,13 +46,42 @@ Make sure you've already git installed. Then you can run the following commands 
    git clone https://github.com/MiniGlome/Tiktok-uploader.git
    cd Tiktok-uploader
    ```
-The script only requires the `requests` module, you can install it with this command:
+The script requires several Python modules. You can install them with this command:
 ```sh
 pip install -r requirements.txt
 ```
+
+For video processing features, you'll also need:
+- **FFmpeg** installed and available in your system PATH
+- **Pillow** and **numpy** for image processing
+
+Install additional dependencies:
+```sh
+pip install Pillow numpy
+```
    
 ## Usage
-### Import in your script
+
+### Video Processing (NEW!)
+
+The video processing tool allows you to create professional TikTok videos with opening effects:
+
+```bash
+# Run the video processing tool
+python main.py
+
+# Test all opening effects
+python test_effects.py
+```
+
+The tool will guide you through:
+1. Selecting an opening effect (slide, circle, fade)
+2. Setting effect duration
+3. Choosing GIF overlay effects
+4. Processing all videos in parallel
+
+### TikTok Uploader
+#### Import in your script
 You can copy the file `Tiktok_uploader.py` in your project folder and use it like this:
 ```python
 from Tiktok_uploader import uploadVideo
