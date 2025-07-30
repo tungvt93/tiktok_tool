@@ -871,24 +871,37 @@ class MainWindowView(BaseView):
                 
             x, y, width, height = bbox
             
-            # Create progress bar container frame with border
-            progress_container = tk.Frame(self.queue_tree, bg='#2d2d2d', height=height, relief='flat', bd=1)
+            # Create progress bar container frame without background
+            progress_container = tk.Frame(self.queue_tree, bg='', height=height, relief='flat', bd=0)
             progress_container.place(x=x, y=y, width=width, height=height)
             
             # Calculate progress bar width
             progress_width = int(width * progress / 100)
             
+            # Determine color based on progress level
+            if progress <= 0:
+                bar_color = '#404040'  # Grey - No progress
+            elif progress <= 25:
+                bar_color = '#ff6b6b'  # Red - Low progress
+            elif progress <= 50:
+                bar_color = '#ffa726'  # Orange - Medium progress
+            elif progress <= 75:
+                bar_color = '#42a5f5'  # Blue - High progress
+            else:
+                bar_color = '#66bb6a'  # Green - Near completion
+            
             # Always create progress bar container, even for 0% progress
             bar_y = (height - 4) // 2
             
-            # Always create a progress bar, even if width is 0 (for visibility)
+            # Always create a progress bar with minimum width for visibility
+            min_width = max(1, progress_width)  # At least 1px wide
             progress_bar = tk.Frame(
                 progress_container, 
-                bg='#007acc' if progress_width > 0 else '#404040', 
-                width=progress_width if progress_width > 0 else 1, 
+                bg=bar_color, 
+                width=min_width, 
                 height=4
             )
-            progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+            progress_bar.place(x=0, y=bar_y, width=min_width, height=4)
             
             # Add percentage text label on top of progress bar
             percentage_text = f"{progress:.1f}%" if progress > 0 else ""
@@ -896,7 +909,7 @@ class MainWindowView(BaseView):
                 text_label = tk.Label(
                     progress_container,
                     text=percentage_text,
-                    bg='#2d2d2d',
+                    bg='',
                     fg='#ffffff',
                     font=("Segoe UI", 8),
                     anchor='center'
@@ -953,22 +966,36 @@ class MainWindowView(BaseView):
                             progress_width = int(width * progress / 100)
                             bar_y = (height - 4) // 2
                             
+                            # Determine color based on progress level
+                            if progress <= 0:
+                                bar_color = '#404040'  # Grey - No progress
+                            elif progress <= 25:
+                                bar_color = '#ff6b6b'  # Red - Low progress
+                            elif progress <= 50:
+                                bar_color = '#ffa726'  # Orange - Medium progress
+                            elif progress <= 75:
+                                bar_color = '#42a5f5'  # Blue - High progress
+                            else:
+                                bar_color = '#66bb6a'  # Green - Near completion
+                            
                             if progress_bar:
                                 # Update existing progress bar
+                                min_width = max(1, progress_width)  # At least 1px wide
                                 progress_bar.configure(
-                                    bg='#007acc' if progress_width > 0 else '#404040',
-                                    width=progress_width if progress_width > 0 else 1
+                                    bg=bar_color,
+                                    width=min_width
                                 )
-                                progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+                                progress_bar.place(x=0, y=bar_y, width=min_width, height=4)
                             else:
                                 # Create new progress bar if doesn't exist
+                                min_width = max(1, progress_width)  # At least 1px wide
                                 progress_bar = tk.Frame(
                                     progress_container, 
-                                    bg='#007acc' if progress_width > 0 else '#404040', 
-                                    width=progress_width if progress_width > 0 else 1, 
+                                    bg=bar_color, 
+                                    width=min_width, 
                                     height=4
                                 )
-                                progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+                                progress_bar.place(x=0, y=bar_y, width=min_width, height=4)
                             
                             # Update text label (don't recreate)
                             percentage_text = f"{progress:.1f}%" if progress > 0 else ""
@@ -985,7 +1012,7 @@ class MainWindowView(BaseView):
                                 text_label = tk.Label(
                                     progress_container,
                                     text=percentage_text,
-                                    bg='#2d2d2d',
+                                    bg='',
                                     fg='#ffffff',
                                     font=("Segoe UI", 8),
                                     anchor='center'
