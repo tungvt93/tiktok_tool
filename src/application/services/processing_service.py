@@ -414,6 +414,10 @@ class ProcessingService:
         try:
             logger.info(f"Processing job: {job.id}")
 
+            # Set up progress callback for video processor
+            if hasattr(self.video_processor, 'set_progress_callback'):
+                self.video_processor.set_progress_callback(self._notify_progress)
+
             # Process video with timeout
             try:
                 result = self.video_processor.process_video(job)

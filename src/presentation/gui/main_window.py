@@ -939,28 +939,49 @@ class MainWindowView(BaseView):
                             # Update container position and size
                             progress_container.place(x=x, y=y, width=width, height=height)
                             
-                            # Clear existing progress bar
+                            # Find existing progress bar and text label (don't destroy all widgets)
+                            progress_bar = None
+                            text_label = None
+                            
                             for widget in progress_container.winfo_children():
-                                widget.destroy()
+                                if isinstance(widget, tk.Frame) and widget.winfo_height() == 4:
+                                    progress_bar = widget
+                                elif isinstance(widget, tk.Label):
+                                    text_label = widget
                             
-                            # Create new progress bar
+                            # Update progress bar width (don't recreate)
                             progress_width = int(width * progress / 100)
-                            
-                            # Always create progress bar, even for 0% progress
                             bar_y = (height - 4) // 2
                             
-                            # Always create a progress bar, even if width is 0 (for visibility)
-                            progress_bar = tk.Frame(
-                                progress_container, 
-                                bg='#007acc' if progress_width > 0 else '#404040', 
-                                width=progress_width if progress_width > 0 else 1, 
-                                height=4
-                            )
-                            progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+                            if progress_bar:
+                                # Update existing progress bar
+                                progress_bar.configure(
+                                    bg='#007acc' if progress_width > 0 else '#404040',
+                                    width=progress_width if progress_width > 0 else 1
+                                )
+                                progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+                            else:
+                                # Create new progress bar if doesn't exist
+                                progress_bar = tk.Frame(
+                                    progress_container, 
+                                    bg='#007acc' if progress_width > 0 else '#404040', 
+                                    width=progress_width if progress_width > 0 else 1, 
+                                    height=4
+                                )
+                                progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
                             
-                            # Add percentage text label on top of progress bar
+                            # Update text label (don't recreate)
                             percentage_text = f"{progress:.1f}%" if progress > 0 else ""
-                            if percentage_text:
+                            
+                            if text_label:
+                                # Update existing text label
+                                if percentage_text:
+                                    text_label.configure(text=percentage_text)
+                                    text_label.place(x=0, y=0, width=width, height=height)
+                                else:
+                                    text_label.place_forget()  # Hide if no text
+                            elif percentage_text:
+                                # Create new text label if needed
                                 text_label = tk.Label(
                                     progress_container,
                                     text=percentage_text,
@@ -1433,9 +1454,19 @@ class MainWindowPresenter(BasePresenter):
     def _on_job_progress(self, job_id: str, progress: float) -> None:
         """Handle job progress update"""
         try:
+            # Round progress to 2 decimal places to reduce spam
+            rounded_progress = round(progress, 2)
+            
+            # Only log if progress changed significantly (avoid spam)
+            if not hasattr(self, '_last_progress'):
+                self._last_progress = {}
+            
+            if job_id not in self._last_progress or abs(self._last_progress[job_id] - rounded_progress) >= 1.0:
+                logger.info(f"Job {job_id} progress: {rounded_progress}%")
+                self._last_progress[job_id] = rounded_progress
+            
             # Update progress bar for specific job
-            logger.info(f"Job {job_id} progress: {progress}%")
-            self.view.update_job_progress(job_id, progress)
+            self.view.update_job_progress(job_id, rounded_progress)
         except Exception as e:
             logger.error(f"Error updating job progress: {e}")
 

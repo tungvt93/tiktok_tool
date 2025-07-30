@@ -10,7 +10,7 @@ import threading
 import json
 import os
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable
 from functools import lru_cache
 import tempfile
 import shutil
@@ -42,6 +42,7 @@ class FFmpegService(IVideoProcessor):
         self.video_config = video_config
         self.ffmpeg_config = ffmpeg_config
         self._active_processes: Dict[str, subprocess.Popen] = {}
+        self._progress_callback: Optional[Callable[[str, float], None]] = None
         
         # Optimized concurrency - allow more concurrent processes based on CPU cores
         import multiprocessing
@@ -59,6 +60,10 @@ class FFmpegService(IVideoProcessor):
         
         logger.info(f"FFmpegService initialized with GPU encoder: {self._gpu_encoder}")
         logger.info(f"Max concurrent processes: {max_concurrent}")
+
+    def set_progress_callback(self, callback: Optional[Callable[[str, float], None]]) -> None:
+        """Set progress callback for reporting job progress"""
+        self._progress_callback = callback
 
     def _detect_gpu_encoder(self) -> Optional[str]:
         """Detect available GPU encoder"""
@@ -142,7 +147,15 @@ class FFmpegService(IVideoProcessor):
                     logger.info("Complex effects detected - using two-step processing")
                     temp_output = temp_path / "temp_output.mp4"
                     cmd = self._build_optimized_processing_command(job, temp_output)
-                    if not self._run_ffmpeg_command(cmd, job.id):
+                    
+                    # Create progress callback
+                    def progress_callback(progress: float):
+                        job.update_progress(progress)
+                        # Notify processing service if available
+                        if hasattr(self, '_progress_callback') and self._progress_callback:
+                            self._progress_callback(job.id, progress)
+                    
+                    if not self._run_ffmpeg_command(cmd, job.id, progress_callback):
                         return ProcessingResult(False, error_message="FFmpeg processing failed")
                     
                     if self._has_opening_effects(job):
@@ -154,7 +167,15 @@ class FFmpegService(IVideoProcessor):
                 else:
                     # Use optimized single-step processing for better performance
                     cmd = self._build_optimized_single_step_command(job, job.output_path)
-                    if not self._run_ffmpeg_command(cmd, job.id):
+                    
+                    # Create progress callback
+                    def progress_callback(progress: float):
+                        job.update_progress(progress)
+                        # Notify processing service if available
+                        if hasattr(self, '_progress_callback') and self._progress_callback:
+                            self._progress_callback(job.id, progress)
+                    
+                    if not self._run_ffmpeg_command(cmd, job.id, progress_callback):
                         return ProcessingResult(False, error_message="FFmpeg processing failed")
                 
             logger.info(f"Video processing completed: {job.output_path}")
@@ -597,7 +618,7 @@ class FFmpegService(IVideoProcessor):
                 "-c", "copy",
                 str(output_video)
             ]
-            return self._run_ffmpeg_command(cmd, "copy_video")
+            return self._run_ffmpeg_command(cmd, "copy_video", None)
         except Exception as e:
             logger.error(f"Error copying video: {e}")
             return False
@@ -612,7 +633,7 @@ class FFmpegService(IVideoProcessor):
                 "-c:a", "copy",
                 str(output_video)
             ]
-            return self._run_ffmpeg_command(cmd, "fade_effect")
+            return self._run_ffmpeg_command(cmd, "fade_effect", None)
         except Exception as e:
             logger.error(f"Error applying fade effect: {e}")
             return False
@@ -857,23 +878,42 @@ class FFmpegService(IVideoProcessor):
             logger.error(f"Error validating output file {output_path}: {e}")
             return False
 
-    def _run_ffmpeg_command(self, cmd: List[str], job_id: str) -> bool:
-        """Execute FFmpeg command with error handling"""
+    def _run_ffmpeg_command(self, cmd: List[str], job_id: str, progress_callback: Optional[Callable[[float], None]] = None) -> bool:
+        """Execute FFmpeg command with progress tracking and error handling"""
         # Acquire semaphore to limit concurrent processes
         with self._ffmpeg_semaphore:
             try:
                 logger.info(f"Running FFmpeg command for job {job_id}: {' '.join(cmd[:5])}...")
                 logger.debug(f"Full FFmpeg command: {' '.join(cmd)}")
 
+                # Add progress reporting to FFmpeg command
+                cmd_with_progress = cmd.copy()
+                if "-progress" not in cmd_with_progress:
+                    # Insert progress reporting before output file
+                    cmd_with_progress.insert(-1, "-progress")
+                    cmd_with_progress.insert(-1, "pipe:1")
+
                 process = subprocess.Popen(
-                    cmd,
+                    cmd_with_progress,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
                 )
 
                 # Store process for potential cancellation
                 self._active_processes[job_id] = process
+
+                # Monitor progress in real-time
+                progress_thread = None
+                if progress_callback:
+                    progress_thread = threading.Thread(
+                        target=self._monitor_ffmpeg_progress,
+                        args=(process, job_id, progress_callback),
+                        daemon=True
+                    )
+                    progress_thread.start()
 
                 # Wait for completion with timeout (5 minutes)
                 try:
@@ -886,12 +926,20 @@ class FFmpegService(IVideoProcessor):
                         del self._active_processes[job_id]
                     return False
 
+                # Wait for progress thread to finish
+                if progress_thread and progress_thread.is_alive():
+                    progress_thread.join(timeout=2.0)
+
                 # Remove from active processes
                 if job_id in self._active_processes:
                     del self._active_processes[job_id]
 
                 if process.returncode == 0:
                     logger.info(f"FFmpeg command completed successfully for job {job_id}")
+                    
+                    # Report 100% progress
+                    if progress_callback:
+                        progress_callback(100.0)
                     
                     # Validate output file
                     output_path = cmd[-1]  # Last argument is output file
@@ -915,6 +963,58 @@ class FFmpegService(IVideoProcessor):
                         pass
                     del self._active_processes[job_id]
                 return False
+
+    def _monitor_ffmpeg_progress(self, process: subprocess.Popen, job_id: str, progress_callback: Callable[[float], None]) -> None:
+        """Monitor FFmpeg progress output and report progress"""
+        try:
+            total_duration = None
+            current_time = 0.0
+            
+            while process.poll() is None:
+                line = process.stdout.readline()
+                if not line:
+                    continue
+                    
+                line = line.strip()
+                
+                # Parse progress information
+                if line.startswith('out_time_ms='):
+                    try:
+                        time_ms = int(line.split('=')[1])
+                        current_time = time_ms / 1000000.0  # Convert microseconds to seconds
+                    except (ValueError, IndexError):
+                        continue
+                        
+                elif line.startswith('total_size=') and total_duration is None:
+                    # Try to estimate total duration from input video
+                    # This is a fallback - we'll get better duration info from job
+                    pass
+                    
+                elif line.startswith('progress='):
+                    status = line.split('=')[1]
+                    if status == 'end':
+                        progress_callback(100.0)
+                        break
+                        
+                # Calculate and report progress
+                if current_time > 0 and total_duration and total_duration > 0:
+                    progress = min((current_time / total_duration) * 100, 99.0)
+                    progress_callback(progress)
+                elif current_time > 0:
+                    # Estimate progress based on time (fallback)
+                    # Assume average video is 30 seconds for estimation
+                    estimated_duration = 30.0
+                    progress = min((current_time / estimated_duration) * 100, 95.0)
+                    progress_callback(progress)
+                    
+        except Exception as e:
+            logger.warning(f"Error monitoring FFmpeg progress for job {job_id}: {e}")
+
+    def _get_job_duration(self, job_id: str) -> Optional[float]:
+        """Get total duration for a job (helper for progress calculation)"""
+        # This would need to be passed from the job context
+        # For now, return None and use fallback estimation
+        return None
 
     @lru_cache(maxsize=256)  # Increased cache size
     def _get_video_duration(self, video_path: Path) -> Optional[float]:
