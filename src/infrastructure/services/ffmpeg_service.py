@@ -14,6 +14,7 @@ from functools import lru_cache
 from ...domain.entities.video import Video
 from ...domain.entities.processing_job import ProcessingJob
 from ...domain.value_objects.dimensions import Dimensions
+from ...domain.value_objects.effect_type import EffectType
 from ...domain.services.video_processor_interface import IVideoProcessor, ProcessingResult, VideoInfo
 from ...shared.config import FFmpegConfig, VideoProcessingConfig
 from ...shared.exceptions import FFmpegException, VideoNotFoundException, VideoCorruptedException
@@ -41,37 +42,37 @@ class FFmpegService(IVideoProcessor):
         self._ffmpeg_semaphore = threading.Semaphore(2)  # Max 2 concurrent FFmpeg processes
 
     def process_video(self, job: ProcessingJob) -> ProcessingResult:
-        """Process a video with effects"""
+        """Process a video with effects using single-step processing for performance"""
         try:
             logger.info(f"Processing video: {job.main_video.path}")
             
-            # Step 1: Render video with hstack and GIF overlay (like old logic)
-            temp_output = job.output_path.with_suffix('.temp.mp4')
+            # Check if we have circle effects that require dedicated processor
+            has_circle_effects = any(
+                effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                              EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]
+                for effect in job.effects
+            )
             
-            # Build command for step 1 (video merge + GIF overlay)
-            cmd = self._build_processing_command(job, temp_output)
-            
-            # Execute step 1
-            if not self._run_ffmpeg_command(cmd, job.id):
-                return ProcessingResult(False, error_message="FFmpeg processing failed")
-            
-            # Step 2: Apply opening effects (like old logic)
-            if self._has_opening_effects(job):
-                success = self._apply_opening_effects(temp_output, job.output_path, job)
-                # Clean up temp file
-                try:
+            if has_circle_effects:
+                # Use two-step processing for circle effects
+                logger.info("Circle effects detected - using two-step processing")
+                temp_output = job.output_path.with_suffix('.temp.mp4')
+                cmd = self._build_processing_command(job, temp_output)
+                if not self._run_ffmpeg_command(cmd, job.id):
+                    return ProcessingResult(False, error_message="FFmpeg processing failed")
+                
+                if self._has_opening_effects(job):
+                    success = self._apply_opening_effects(temp_output, job.output_path, job)
                     temp_output.unlink()
-                except:
-                    pass
-                if not success:
-                    return ProcessingResult(False, error_message="Opening effect processing failed")
-            else:
-                # No opening effects, just rename temp file
-                try:
+                    if not success:
+                        return ProcessingResult(False, error_message="Opening effects processing failed")
+                else:
                     temp_output.rename(job.output_path)
-                except Exception as e:
-                    logger.error(f"Failed to rename temp file: {e}")
-                    return ProcessingResult(False, error_message="Failed to create output file")
+            else:
+                # Use single-step processing for better performance
+                cmd = self._build_single_step_command(job, job.output_path)
+                if not self._run_ffmpeg_command(cmd, job.id):
+                    return ProcessingResult(False, error_message="FFmpeg processing failed")
             
             logger.info(f"Video processing completed: {job.output_path}")
             return ProcessingResult(True, output_path=job.output_path)
@@ -229,6 +230,141 @@ class FFmpegService(IVideoProcessor):
         except Exception as e:
             logger.error(f"Error cancelling job {job_id}: {e}")
             return False
+
+    def _build_single_step_command(self, job: ProcessingJob, output_path: Path) -> List[str]:
+        """Build single-step FFmpeg command combining all effects for performance"""
+        from ...domain.value_objects.effect_type import EffectType
+        
+        cmd = ["ffmpeg", "-y"]
+        
+        # Add input files
+        cmd.extend(["-i", str(job.main_video.path)])
+        
+        if job.background_video:
+            cmd.extend(["-i", str(job.background_video.path)])
+        
+        # Add GIF inputs
+        gif_inputs = []
+        for effect in job.effects:
+            if effect.type == EffectType.GIF_OVERLAY:
+                gif_path = self._get_or_create_tiled_gif(Path(effect.get_parameter('gif_path')))
+                if gif_path:
+                    cmd.extend(["-i", str(gif_path)])
+                    gif_inputs.append(gif_path)
+        
+        # Build filter complex
+        filter_parts = []
+        input_index = 0
+        
+        # Scale main video to half width (like old logic)
+        filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}[left]")
+        input_index += 1
+        
+        # Scale background video to half width (like old logic)
+        if job.background_video:
+            filter_parts.append(f"[{input_index}:v]scale={self.video_config.half_width}:{self.video_config.output_height}[right]")
+            input_index += 1
+            # Horizontal stack like old logic
+            filter_parts.append("[left][right]hstack=inputs=2[stacked]")
+            video_label = "[stacked]"
+        else:
+            video_label = "[left]"
+        
+        # Apply GIF overlays
+        for effect in job.effects:
+            if effect.type == EffectType.GIF_OVERLAY:
+                gif_filter = self._build_gif_overlay_filter_single_step(effect, video_label, f"[gif_{input_index}]", input_index)
+                if gif_filter:
+                    filter_parts.append(gif_filter)
+                    video_label = f"[gif_{input_index}]"
+                input_index += 1
+        
+        # Apply opening effects (fade, slide, circle)
+        for effect in job.effects:
+            if effect.type != EffectType.GIF_OVERLAY:
+                effect_filter = self._build_opening_effect_filter_single_step(effect, video_label, "[final]")
+                if effect_filter:
+                    filter_parts.append(effect_filter)
+                    video_label = "[final]"
+                    break  # Only apply first opening effect like old logic
+        
+        # If no opening effects, just copy the video
+        if video_label != "[final]":
+            filter_parts.append(f"{video_label}copy[final]")
+        
+        # Build final command
+        cmd.extend([
+            "-filter_complex", ";".join(filter_parts),
+            "-map", "[final]",
+            "-map", "0:a",  # Include audio from first input
+            "-c:v", self.ffmpeg_config.codec_video,
+            "-c:a", "copy",  # Copy audio without re-encoding
+            "-preset", self.ffmpeg_config.preset,
+            "-crf", str(self.video_config.crf_value),
+            "-threads", self.ffmpeg_config.threads,
+            "-movflags", "+faststart+write_colr",
+            "-shortest",
+            str(output_path)
+        ])
+        
+        return cmd
+
+    def _build_gif_overlay_filter_single_step(self, effect, input_label: str, output_label: str, gif_input_index: int) -> Optional[str]:
+        """Build GIF overlay filter for single-step processing"""
+        from ...domain.value_objects.effect_type import EffectType
+
+        if effect.type == EffectType.GIF_OVERLAY:
+            # Get parameters
+            x_pos = effect.get_parameter('x', 10)
+            y_pos = effect.get_parameter('y', 10)
+            scale = effect.get_parameter('scale', 1.0)
+
+            # Build overlay filter
+            gif_stream = f"[{gif_input_index}:v]"
+            
+            # Scale the GIF if needed
+            if scale != 1.0:
+                scale_filter = f"{gif_stream}scale=iw*{scale}:ih*{scale}[gif_scaled]"
+                overlay_filter = f"{input_label}[gif_scaled]overlay={x_pos}:{y_pos}{output_label}"
+                return f"{scale_filter};{overlay_filter}"
+            else:
+                return f"{input_label}{gif_stream}overlay={x_pos}:{y_pos}{output_label}"
+
+        return None
+
+    def _build_opening_effect_filter_single_step(self, effect, input_label: str, output_label: str) -> Optional[str]:
+        """Build opening effect filter for single-step processing"""
+        from ...domain.value_objects.effect_type import EffectType
+
+        if effect.type == EffectType.FADE_IN:
+            return f"{input_label}fade=t=in:st=0:d={effect.duration}{output_label}"
+        
+        elif effect.type in [EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT, 
+                           EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]:
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            
+            if effect.type == EffectType.SLIDE_RIGHT_TO_LEFT:
+                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(1-t/{effect.duration}),0)':y=0"
+            elif effect.type == EffectType.SLIDE_LEFT_TO_RIGHT:
+                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(t/{effect.duration}-1),0)':y=0"
+            elif effect.type == EffectType.SLIDE_TOP_TO_BOTTOM:
+                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(t/{effect.duration}-1),0)'"
+            elif effect.type == EffectType.SLIDE_BOTTOM_TO_TOP:
+                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(1-t/{effect.duration}),0)'"
+            else:
+                return None
+            
+            return f"{input_label}{crop_filter}{output_label}"
+        
+        elif effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                           EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
+            # For circle effects in single-step, we need to use the dedicated CircleEffectProcessor
+            # because they require complex mask generation that can't be done with simple FFmpeg filters
+            logger.warning(f"Circle effect {effect.type} requires dedicated processor - switching to two-step processing")
+            return None  # Return None to trigger two-step processing
+        
+        return None
 
     def _build_processing_command(self, job: ProcessingJob, temp_output: Path) -> List[str]:
         """Build FFmpeg command for processing job"""
