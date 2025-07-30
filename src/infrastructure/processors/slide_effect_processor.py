@@ -193,6 +193,8 @@ class SlideEffectProcessor(IEffectProcessor):
 
         cmd.extend([
             "-filter_complex", slide_filter,
+            "-map", "[v]",  # Map the video output from filter
+            "-map", "0:a",  # Map audio from input
             "-c:v", self.ffmpeg_config.codec_video,
             "-preset", self.ffmpeg_config.preset,
             "-c:a", "copy",  # Copy audio without re-encoding
@@ -207,61 +209,45 @@ class SlideEffectProcessor(IEffectProcessor):
         height = dimensions.height
         duration = effect.duration
 
-        # Get easing function
-        easing = effect.get_parameter('easing', 'linear')
-        easing_expr = self._get_easing_expression(easing)
+        # No easing needed for simple slide effects
 
         if effect.type == EffectType.SLIDE_RIGHT_TO_LEFT:
-            # Start from right (off-screen) and slide to normal position
+            # Video slides from right to left over black background
             return (
-                f"[0:v]pad={width*2}:{height}:0:0:black[padded];"
-                f"[padded]crop={width}:{height}:"
-                f"'if(lt(t,{duration}),{width}*{easing_expr},0)':0[v]"
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x='if(lt(t,{duration}),{width}-(t/{duration})*{width},0)':y=0[v]"
             )
 
         elif effect.type == EffectType.SLIDE_LEFT_TO_RIGHT:
-            # Start from left (off-screen) and slide to normal position
+            # Video slides from left to right over black background
             return (
-                f"[0:v]pad={width*2}:{height}:{width}:0:black[padded];"
-                f"[padded]crop={width}:{height}:"
-                f"'if(lt(t,{duration}),{width}*(1-{easing_expr}),{width})':0[v]"
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x='if(lt(t,{duration}),-(t/{duration})*{width}+{width},0)':y=0[v]"
             )
 
         elif effect.type == EffectType.SLIDE_TOP_TO_BOTTOM:
-            # Start from top (off-screen) and slide to normal position
+            # Video slides from top to bottom over black background
             return (
-                f"[0:v]pad={width}:{height*2}:0:{height}:black[padded];"
-                f"[padded]crop={width}:{height}:"
-                f"0:'if(lt(t,{duration}),{height}*(1-{easing_expr}),{height})'[v]"
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x=0:y='if(lt(t,{duration}),-(t/{duration})*{height}+{height},0)'[v]"
             )
 
         elif effect.type == EffectType.SLIDE_BOTTOM_TO_TOP:
-            # Start from bottom (off-screen) and slide to normal position
+            # Video slides from bottom to top over black background
             return (
-                f"[0:v]pad={width}:{height*2}:0:0:black[padded];"
-                f"[padded]crop={width}:{height}:"
-                f"0:'if(lt(t,{duration}),{height}*{easing_expr},0)'[v]"
+                f"color=black:{width}x{height}:d={duration}[bg];"
+                f"[0:v]scale={width}:{height}[video];"
+                f"[bg][video]overlay=x=0:y='if(lt(t,{duration}),{height}-(t/{duration})*{height},0)'[v]"
             )
 
         else:
             # Fallback - no effect
             return "[0:v]copy[v]"
 
-    def _get_easing_expression(self, easing: str) -> str:
-        """Get FFmpeg expression for easing function"""
-        # Normalized time (0 to 1)
-        t_norm = "t/duration"
 
-        if easing == 'linear':
-            return t_norm
-        elif easing == 'ease-in':
-            return f"pow({t_norm}, 2)"
-        elif easing == 'ease-out':
-            return f"1 - pow(1 - {t_norm}, 2)"
-        elif easing == 'ease-in-out':
-            return f"if(lt({t_norm}, 0.5), 2*pow({t_norm}, 2), 1 - 2*pow(1 - {t_norm}, 2))"
-        else:
-            return t_norm  # Default to linear
 
     def _run_ffmpeg_command(self, cmd: List[str]) -> bool:
         """Execute FFmpeg command"""

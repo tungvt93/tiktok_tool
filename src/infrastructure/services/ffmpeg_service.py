@@ -46,16 +46,18 @@ class FFmpegService(IVideoProcessor):
         try:
             logger.info(f"Processing video: {job.main_video.path}")
             
-            # Check if we have circle effects that require dedicated processor
-            has_circle_effects = any(
+            # Check if we have effects that require dedicated processor
+            has_complex_effects = any(
                 effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
-                              EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]
+                              EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW,
+                              EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT,
+                              EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]
                 for effect in job.effects
             )
             
-            if has_circle_effects:
-                # Use two-step processing for circle effects
-                logger.info("Circle effects detected - using two-step processing")
+            if has_complex_effects:
+                # Use two-step processing for complex effects
+                logger.info("Complex effects detected - using two-step processing")
                 temp_output = job.output_path.with_suffix('.temp.mp4')
                 cmd = self._build_processing_command(job, temp_output)
                 if not self._run_ffmpeg_command(cmd, job.id):
@@ -341,21 +343,10 @@ class FFmpegService(IVideoProcessor):
         
         elif effect.type in [EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT, 
                            EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]:
-            width = self.video_config.output_width
-            height = self.video_config.output_height
-            
-            if effect.type == EffectType.SLIDE_RIGHT_TO_LEFT:
-                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(1-t/{effect.duration}),0)':y=0"
-            elif effect.type == EffectType.SLIDE_LEFT_TO_RIGHT:
-                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(t/{effect.duration}-1),0)':y=0"
-            elif effect.type == EffectType.SLIDE_TOP_TO_BOTTOM:
-                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(t/{effect.duration}-1),0)'"
-            elif effect.type == EffectType.SLIDE_BOTTOM_TO_TOP:
-                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(1-t/{effect.duration}),0)'"
-            else:
-                return None
-            
-            return f"{input_label}{crop_filter}{output_label}"
+            # For slide effects in single-step, we need to use the dedicated SlideEffectProcessor
+            # because they require complex pad/crop logic that can't be done with simple crop filters
+            logger.warning(f"Slide effect {effect.type} requires dedicated processor - switching to two-step processing")
+            return None  # Return None to trigger two-step processing
         
         elif effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
                            EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
@@ -530,32 +521,33 @@ class FFmpegService(IVideoProcessor):
             return False
 
     def _apply_slide_effect(self, input_video: Path, output_video: Path, effect_type, duration: float) -> bool:
-        """Apply slide effect"""
+        """Apply slide effect using dedicated processor"""
         try:
             from ...domain.value_objects.effect_type import EffectType
+            from ...domain.entities.video import Video
+            from ...domain.entities.effect import Effect
+            from ...infrastructure.processors.slide_effect_processor import SlideEffectProcessor
             
-            width = self.video_config.output_width
-            height = self.video_config.output_height
+            # Get video duration and dimensions
+            video_duration = self._get_video_duration(input_video) or 10.0
+            dims = self._get_video_dimensions(input_video) or (1920, 1080)
             
-            if effect_type == EffectType.SLIDE_RIGHT_TO_LEFT:
-                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{duration}),{width}*(1-t/{duration}),0)':y=0"
-            elif effect_type == EffectType.SLIDE_LEFT_TO_RIGHT:
-                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{duration}),{width}*(t/{duration}-1),0)':y=0"
-            elif effect_type == EffectType.SLIDE_TOP_TO_BOTTOM:
-                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{duration}),{height}*(t/{duration}-1),0)'"
-            elif effect_type == EffectType.SLIDE_BOTTOM_TO_TOP:
-                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{duration}),{height}*(1-t/{duration}),0)'"
+            # Convert tuple to Dimensions object if needed
+            from ...domain.value_objects.dimensions import Dimensions
+            if isinstance(dims, tuple):
+                video_dimensions = Dimensions(*dims)
             else:
-                return self._copy_video(input_video, output_video)
+                video_dimensions = dims
             
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", str(input_video),
-                "-vf", crop_filter,
-                "-c:a", "copy",
-                str(output_video)
-            ]
-            return self._run_ffmpeg_command(cmd, "slide_effect")
+            # Create Video and Effect entities
+            video = Video(path=input_video, duration=video_duration, dimensions=video_dimensions)
+            effect = Effect(type=effect_type, duration=duration)
+            
+            # Use SlideEffectProcessor
+            processor = SlideEffectProcessor(self.ffmpeg_config)
+            result = processor.apply_effect(video, effect, output_video)
+            
+            return result.success
         except Exception as e:
             logger.error(f"Error applying slide effect: {e}")
             return False
