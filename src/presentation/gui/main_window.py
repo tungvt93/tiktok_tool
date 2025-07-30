@@ -186,11 +186,11 @@ class MainWindowView(BaseView):
         content_frame.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Spinner animation
-        spinner_label = ttk.Label(content_frame, text="⏳", font=("Segoe UI", 24))
+        spinner_label = ttk.Label(content_frame, text="⏳")
         spinner_label.pack(pady=(0, 10))
         
         # Message
-        message_label = ttk.Label(content_frame, text=message, font=("Segoe UI", 10))
+        message_label = ttk.Label(content_frame, text=message)
         message_label.pack()
         
         # Animate spinner
@@ -238,7 +238,7 @@ class MainWindowView(BaseView):
         
         # Icon and message
         icon_text = "✅" if type_ == "success" else "❌" if type_ == "error" else "ℹ️"
-        icon_label = ttk.Label(content_frame, text=icon_text, font=("Segoe UI", 16))
+        icon_label = ttk.Label(content_frame, text=icon_text)
         icon_label.pack(side="left", padx=(10, 15))
         
         message_label = ttk.Label(content_frame, text=message, wraplength=300)
@@ -295,14 +295,12 @@ class MainWindowView(BaseView):
         title_frame.grid(row=0, column=0, sticky="w", padx=15, pady=10)
         
         # Icon placeholder (you can add actual icon later)
-        icon_label = ttk.Label(title_frame, text="🎬", font=("Segoe UI", 20))
+        icon_label = ttk.Label(title_frame, text="🎬")
         icon_label.pack(side="left", padx=(0, 10))
         
         title_label = ttk.Label(
             title_frame,
-            text="TikTok Video Processing Tool",
-            style="Header.TLabel"
-        )
+            text="TikTok Video Processing Tool")
         title_label.pack(side="left")
 
         # Control buttons with better spacing
@@ -390,9 +388,12 @@ class MainWindowView(BaseView):
         v_scrollbar.grid(row=0, column=1, sticky="ns")
         h_scrollbar.grid(row=1, column=0, sticky="ew")
 
-        # Status info
-        self.video_status_label = ttk.Label(video_frame, text="No videos loaded")
-        self.video_status_label.grid(row=2, column=0, sticky="w", padx=10, pady=(0, 8))
+        # Status info with better styling
+        status_frame = ttk.Frame(video_frame)
+        status_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 8))
+        
+        self.video_status_label = ttk.Label(status_frame, text="📁 No videos loaded", foreground="#808080")
+        self.video_status_label.pack(side="left", padx=10, pady=5)
 
     def _create_processing_panel(self):
         """Create processing panel with modern card design"""
@@ -411,47 +412,52 @@ class MainWindowView(BaseView):
         self._create_processing_queue(processing_frame)
 
     def _create_effects_section(self, parent):
-        """Create effects configuration section"""
-        effects_frame = ttk.LabelFrame(parent, text="Effects Configuration")
+        """Create effects configuration section with modern styling"""
+        effects_frame = ttk.LabelFrame(parent, text="🎨 Effects Configuration")
         effects_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         effects_frame.columnconfigure(1, weight=1)
 
         # Opening Effects Section
-        opening_frame = ttk.LabelFrame(effects_frame, text="Opening Effects")
+        opening_frame = ttk.LabelFrame(effects_frame, text="🎬 Opening Effects")
         opening_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         opening_frame.columnconfigure(1, weight=1)
 
         # Effect type
         ttk.Label(opening_frame, text="Effect Type:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         self.effect_var = tk.StringVar(value="none")
-        self.effect_combo = ttk.Combobox(opening_frame, textvariable=self.effect_var, state="readonly")
+        self.effect_combo = ttk.Combobox(opening_frame, textvariable=self.effect_var, 
+                                        state="readonly")
         self.effect_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
         # Duration
         ttk.Label(opening_frame, text="Duration (s):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         self.duration_var = tk.StringVar(value="2.0")
-        duration_spin = ttk.Spinbox(opening_frame, from_=0.5, to=10.0, increment=0.5, textvariable=self.duration_var)
+        duration_spin = ttk.Spinbox(opening_frame, from_=0.5, to=10.0, increment=0.5, 
+                                   textvariable=self.duration_var)
         duration_spin.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
         # Random effect
         self.random_effect_var = tk.BooleanVar()
-        random_check = ttk.Checkbutton(opening_frame, text="Use Random Effects", variable=self.random_effect_var)
+        random_check = ttk.Checkbutton(opening_frame, text="🎲 Use Random Effects", 
+                                      variable=self.random_effect_var)
         random_check.grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
         # GIF Effects Section
-        gif_frame = ttk.LabelFrame(effects_frame, text="GIF Effects")
+        gif_frame = ttk.LabelFrame(effects_frame, text="🎭 GIF Effects")
         gif_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
         gif_frame.columnconfigure(1, weight=1)
 
         # GIF selection
         ttk.Label(gif_frame, text="GIF Effect:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         self.gif_var = tk.StringVar(value="none")
-        self.gif_combo = ttk.Combobox(gif_frame, textvariable=self.gif_var, state="readonly")
+        self.gif_combo = ttk.Combobox(gif_frame, textvariable=self.gif_var, 
+                                     state="readonly")
         self.gif_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
         # Random GIF
         self.random_gif_var = tk.BooleanVar()
-        random_gif_check = ttk.Checkbutton(gif_frame, text="Use Random GIF", variable=self.random_gif_var)
+        random_gif_check = ttk.Checkbutton(gif_frame, text="🎲 Use Random GIF", 
+                                          variable=self.random_gif_var)
         random_gif_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
     def _create_processing_controls(self, parent):
@@ -459,33 +465,41 @@ class MainWindowView(BaseView):
         controls_frame = ttk.Frame(parent)
         controls_frame.grid(row=1, column=0, sticky="ew", padx=5, pady=5)
 
-        self.start_processing_btn = ttk.Button(controls_frame, text="Start Processing")
+        self.start_processing_btn = ttk.Button(controls_frame, text="▶️ Start Processing")
         self.start_processing_btn.pack(side="left", padx=(0, 5))
 
-        self.pause_processing_btn = ttk.Button(controls_frame, text="Pause", state="disabled")
+        self.pause_processing_btn = ttk.Button(controls_frame, text="⏸️ Pause", state="disabled")
         self.pause_processing_btn.pack(side="left", padx=(0, 5))
 
-        self.stop_processing_btn = ttk.Button(controls_frame, text="Stop", state="disabled")
+        self.stop_processing_btn = ttk.Button(controls_frame, text="⏹️ Stop", state="disabled")
         self.stop_processing_btn.pack(side="left")
 
-        # Progress bar
+        # Progress bar with better styling
         self.overall_progress = ttk.Progressbar(controls_frame, mode="determinate")
         self.overall_progress.pack(side="right", fill="x", expand=True, padx=(10, 0))
 
     def _create_processing_queue(self, parent):
-        """Create processing queue display"""
-        queue_frame = ttk.LabelFrame(parent, text="Processing Queue")
+        """Create processing queue display with modern styling"""
+        queue_frame = ttk.LabelFrame(parent, text="📋 Processing Queue")
         queue_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
         queue_frame.rowconfigure(0, weight=1)
         queue_frame.columnconfigure(0, weight=1)
 
-        # Queue treeview
+        # Queue treeview with better column headers
         queue_columns = ("Video", "Status", "Progress", "Time")
-        self.queue_tree = ttk.Treeview(queue_frame, columns=queue_columns, show="headings")
+        self.queue_tree = ttk.Treeview(queue_frame, columns=queue_columns, show="headings", height=6)
 
-        for col in queue_columns:
-            self.queue_tree.heading(col, text=col)
-            self.queue_tree.column(col, width=100)
+        # Configure columns with better headers and widths
+        column_configs = [
+            ("Video", "🎬 Video", 200),
+            ("Status", "📊 Status", 120),
+            ("Progress", "📈 Progress", 100),
+            ("Time", "⏱️ Time", 100)
+        ]
+        
+        for col, header, width in column_configs:
+            self.queue_tree.heading(col, text=header)
+            self.queue_tree.column(col, width=width, minwidth=80)
 
         # Scrollbar for queue
         queue_scrollbar = ttk.Scrollbar(queue_frame, orient="vertical", command=self.queue_tree.yview)
@@ -495,34 +509,47 @@ class MainWindowView(BaseView):
         queue_scrollbar.grid(row=0, column=1, sticky="ns")
 
     def _create_status_bar(self):
-        """Create status bar"""
+        """Create status bar with modern styling"""
         self.status_frame = ttk.Frame(self.main_frame)
-        self.status_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        self.status_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0), padx=5)
 
-        self.status_label = ttk.Label(self.status_frame, text="Ready")
+        # Status indicator with icon
+        status_container = ttk.Frame(self.status_frame)
+        status_container.pack(side="left", padx=10, pady=5)
+        
+        self.status_icon = ttk.Label(status_container, text="✅")
+        self.status_icon.pack(side="left", padx=(0, 5))
+        
+        self.status_label = ttk.Label(status_container, text="Ready")
         self.status_label.pack(side="left")
 
-        # Statistics
-        self.stats_label = ttk.Label(self.status_frame, text="")
+        # Statistics with better formatting
+        stats_container = ttk.Frame(self.status_frame)
+        stats_container.pack(side="right", padx=10, pady=5)
+        
+        self.stats_label = ttk.Label(stats_container, text="")
         self.stats_label.pack(side="right")
 
     def _setup_styles(self):
         """Setup custom styles with modern design"""
         style = ttk.Style()
         
-        # Modern color palette
+        # Modern color palette with better contrast
         colors = {
-            'bg_primary': '#1a1a1a',
-            'bg_secondary': '#2d2d2d', 
-            'bg_tertiary': '#3d3d3d',
-            'accent_primary': '#007acc',
-            'accent_secondary': '#00b4d8',
-            'text_primary': '#ffffff',
-            'text_secondary': '#b0b0b0',
-            'success': '#28a745',
-            'warning': '#ffc107',
-            'error': '#dc3545',
-            'border': '#404040'
+            'bg_primary': '#1e1e1e',      # Darker background
+            'bg_secondary': '#2d2d2d',    # Card backgrounds
+            'bg_tertiary': '#3d3d3d',     # Input fields
+            'accent_primary': '#007acc',   # Blue accent
+            'accent_secondary': '#00b4d8', # Light blue
+            'accent_success': '#28a745',   # Green
+            'accent_warning': '#ffc107',   # Yellow
+            'accent_error': '#dc3545',     # Red
+            'text_primary': '#ffffff',     # White text
+            'text_secondary': '#b0b0b0',   # Light gray text
+            'text_muted': '#808080',       # Muted text
+            'border': '#404040',           # Borders
+            'hover': '#4a4a4a',            # Hover state
+            'active': '#5a5a5a'            # Active state
         }
         
         # Configure modern dark theme
@@ -532,16 +559,14 @@ class MainWindowView(BaseView):
         style.configure("Main.TFrame", background=colors['bg_primary'])
         style.configure("Main.TLabel", 
                        background=colors['bg_primary'], 
-                       foreground=colors['text_primary'],
-                       font=("Segoe UI", 10))
+                       foreground=colors['text_primary'])
         
-        # Header styling
+        # Header styling with accent
         style.configure("Header.TLabel", 
                        background=colors['bg_primary'],
-                       foreground=colors['text_primary'],
-                       font=("Segoe UI", 16, "bold"))
+                       foreground=colors['accent_primary'])
         
-        # Frame styling
+        # Card styling with better contrast
         style.configure("Card.TFrame", 
                        background=colors['bg_secondary'],
                        relief="flat",
@@ -550,42 +575,17 @@ class MainWindowView(BaseView):
         style.configure("Card.TLabelFrame", 
                        background=colors['bg_secondary'],
                        foreground=colors['text_primary'],
-                       font=("Segoe UI", 10, "bold"),
                        relief="flat",
                        borderwidth=1)
         
         style.configure("Card.TLabelFrame.Label", 
                        background=colors['bg_secondary'],
-                       foreground=colors['accent_primary'],
-                       font=("Segoe UI", 10, "bold"))
+                       foreground=colors['accent_primary'])
         
-        # Also configure the base TLabelFrame for compatibility
-        style.configure("TLabelFrame", 
-                       background=colors['bg_secondary'],
-                       foreground=colors['text_primary'],
-                       font=("Segoe UI", 10, "bold"),
-                       relief="flat",
-                       borderwidth=1)
-        
-        style.configure("TLabelFrame.Label", 
-                       background=colors['bg_secondary'],
-                       foreground=colors['accent_primary'],
-                       font=("Segoe UI", 10, "bold"))
-        
-        # Configure other base styles for compatibility
-        style.configure("TFrame", background=colors['bg_secondary'])
-        style.configure("TLabel", 
-                       background=colors['bg_secondary'], 
-                       foreground=colors['text_primary'])
-        style.configure("TButton", 
-                       background=colors['bg_tertiary'],
-                       foreground=colors['text_primary'])
-        
-        # Button styling
+        # Button styling with modern design
         style.configure("Primary.TButton",
                        background=colors['accent_primary'],
                        foreground=colors['text_primary'],
-                       font=("Segoe UI", 9, "bold"),
                        relief="flat",
                        borderwidth=0,
                        padding=(12, 6))
@@ -597,27 +597,36 @@ class MainWindowView(BaseView):
         style.configure("Secondary.TButton",
                        background=colors['bg_tertiary'],
                        foreground=colors['text_primary'],
-                       font=("Segoe UI", 9),
                        relief="flat",
                        borderwidth=0,
                        padding=(10, 5))
         
         style.map("Secondary.TButton",
-                 background=[("active", colors['accent_primary']),
-                           ("pressed", colors['accent_primary'])])
+                 background=[("active", colors['hover']),
+                           ("pressed", colors['active'])])
         
-        # Treeview styling
+        # Success button for processing
+        style.configure("Success.TButton",
+                       background=colors['accent_success'],
+                       foreground=colors['text_primary'],
+                       relief="flat",
+                       borderwidth=0,
+                       padding=(12, 6))
+        
+        style.map("Success.TButton",
+                 background=[("active", "#218838"),
+                           ("pressed", "#1e7e34")])
+        
+        # Treeview styling with better contrast
         style.configure("Treeview",
                        background=colors['bg_tertiary'],
                        foreground=colors['text_primary'],
                        fieldbackground=colors['bg_tertiary'],
-                       font=("Segoe UI", 9),
                        rowheight=25)
         
         style.configure("Treeview.Heading",
                        background=colors['bg_secondary'],
                        foreground=colors['text_primary'],
-                       font=("Segoe UI", 9, "bold"),
                        relief="flat")
         
         style.map("Treeview",
@@ -637,8 +646,7 @@ class MainWindowView(BaseView):
                        fieldbackground=colors['bg_tertiary'],
                        foreground=colors['text_primary'],
                        borderwidth=1,
-                       relief="flat",
-                       font=("Segoe UI", 9))
+                       relief="flat")
         
         # Combobox styling
         style.configure("Custom.TCombobox",
@@ -646,24 +654,20 @@ class MainWindowView(BaseView):
                        foreground=colors['text_primary'],
                        background=colors['bg_tertiary'],
                        borderwidth=1,
-                       relief="flat",
-                       font=("Segoe UI", 9))
+                       relief="flat")
         
         # Status indicators
         style.configure("Success.TLabel",
-                       background=colors['success'],
-                       foreground=colors['text_primary'],
-                       font=("Segoe UI", 9, "bold"))
+                       background=colors['accent_success'],
+                       foreground=colors['text_primary'])
         
         style.configure("Warning.TLabel",
-                       background=colors['warning'],
-                       foreground=colors['bg_primary'],
-                       font=("Segoe UI", 9, "bold"))
+                       background=colors['accent_warning'],
+                       foreground=colors['bg_primary'])
         
         style.configure("Error.TLabel",
-                       background=colors['error'],
-                       foreground=colors['text_primary'],
-                       font=("Segoe UI", 9, "bold"))
+                       background=colors['accent_error'],
+                       foreground=colors['text_primary'])
         
         # Apply styles to main window
         self.root.configure(bg=colors['bg_primary'])
@@ -673,19 +677,31 @@ class MainWindowView(BaseView):
     def show_error(self, message: str) -> None:
         """Show error message with modern notification"""
         self.show_error_notification(message)
+        # Update status bar
+        self.status_icon.config(text="❌")
+        self.status_label.config(text="Error")
 
     def show_success(self, message: str) -> None:
         """Show success message with modern notification"""
         self.show_success_notification(message)
+        # Update status bar
+        self.status_icon.config(text="✅")
+        self.status_label.config(text="Success")
 
     def show_loading(self, message: str = "Loading...") -> None:
         """Show loading indicator with modern design"""
         self.show_loading_animation(message)
+        # Update status bar
+        self.status_icon.config(text="⏳")
+        self.status_label.config(text=message)
         self.root.update_idletasks()
 
     def hide_loading(self) -> None:
         """Hide loading indicator"""
         self.hide_loading_animation()
+        # Update status bar
+        self.status_icon.config(text="✅")
+        self.status_label.config(text="Ready")
 
     def update_ui(self) -> None:
         """Update UI elements"""
@@ -693,21 +709,37 @@ class MainWindowView(BaseView):
 
     # Video list management
     def update_video_list(self, videos: List[VideoDTO]) -> None:
-        """Update video list display"""
+        """Update video list display with better formatting"""
         # Clear existing items
         for item in self.video_tree.get_children():
             self.video_tree.delete(item)
 
-        # Add videos
+        # Add videos with better status display
         for video in videos:
+            # Format status with icon
+            status = "✅ Cached" if video.is_cached() else "🆕 New"
+            
             values = (
                 video.filename,
                 FormatHelper.format_duration(video.duration),
                 FormatHelper.format_file_size(video.file_size or 0),
-                "Cached" if video.is_cached() else "New"
+                status
             )
 
             item = self.video_tree.insert("", "end", values=values, tags=(video.path))
+            
+            # Update status label
+            if videos:
+                total_duration = sum(v.duration for v in videos)
+                self.video_status_label.config(
+                    text=f"📁 {len(videos)} videos loaded • Total: {FormatHelper.format_duration(total_duration)}",
+                    foreground="#b0b0b0"
+                )
+            else:
+                self.video_status_label.config(
+                    text="📁 No videos loaded",
+                    foreground="#808080"
+                )
 
     def get_selected_videos(self) -> List[str]:
         """Get list of selected video paths"""
@@ -752,29 +784,42 @@ class MainWindowView(BaseView):
 
     # Processing queue management
     def update_processing_queue(self, jobs: List[ProcessingJobDTO]) -> None:
-        """Update processing queue display"""
+        """Update processing queue display with better formatting"""
         # Clear existing items
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
 
-        # Add jobs
+        # Add jobs with better status display
         for job in jobs:
+            # Format status with icons
+            status_icons = {
+                "queued": "⏳ Queued",
+                "processing": "⚡ Processing", 
+                "completed": "✅ Completed",
+                "failed": "❌ Failed",
+                "cancelled": "🚫 Cancelled"
+            }
+            
+            status = status_icons.get(job.status.lower(), job.status.title())
+            
             values = (
                 job.main_video_name,
-                job.status.title(),
+                status,
                 f"{job.progress:.1f}%",
                 FormatHelper.format_duration(job.actual_duration or 0)
             )
 
-            self.queue_tree.insert("", "end", values=values, tags=(job.id))
+            self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status))
 
     def update_overall_progress(self, progress: float) -> None:
         """Update overall progress bar"""
         self.overall_progress['value'] = progress
 
     def update_statistics(self, stats_text: str) -> None:
-        """Update statistics display"""
-        self.stats_label.config(text=stats_text)
+        """Update statistics display with better formatting"""
+        # Format statistics with icons
+        formatted_stats = f"📊 {stats_text}"
+        self.stats_label.config(text=formatted_stats)
 
     def _setup_responsive_design(self):
         """Setup responsive design features"""

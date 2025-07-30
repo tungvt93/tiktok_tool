@@ -137,8 +137,7 @@ class EffectsConfigWidget:
         # Listbox for preset effects with better styling
         self.preset_effects_listbox = tk.Listbox(effects_list_frame, height=8, 
                                                 bg='#3d3d3d', fg='#ffffff', 
-                                                selectbackground='#007acc',
-                                                font=("Segoe UI", 9))
+                                                selectbackground='#007acc')
         preset_scrollbar = ttk.Scrollbar(effects_list_frame, orient="vertical",
                                         command=self.preset_effects_listbox.yview)
         self.preset_effects_listbox.configure(yscrollcommand=preset_scrollbar.set)

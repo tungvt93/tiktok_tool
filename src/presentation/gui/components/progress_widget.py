@@ -85,7 +85,7 @@ class ProgressWidget:
         list_header = ttk.Frame(self.job_list_frame)
         list_header.pack(fill="x", pady=(0, 5))
 
-        ttk.Label(list_header, text="📋 Processing Queue", font=("Segoe UI", 10, "bold")).pack(side="left")
+        ttk.Label(list_header, text="📋 Processing Queue").pack(side="left")
 
         # Job treeview with modern styling
         columns = ("Video", "Status", "Progress", "Time", "Actions")
@@ -130,7 +130,7 @@ class ProgressWidget:
         queue_card.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=2)
         queue_card.columnconfigure(0, weight=1)
         
-        self.queue_label = ttk.Label(queue_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.queue_label = ttk.Label(queue_card, text="0")
         self.queue_label.grid(row=0, column=0, padx=10, pady=5)
 
         # Processing stat card
@@ -138,7 +138,7 @@ class ProgressWidget:
         processing_card.grid(row=0, column=1, sticky="ew", padx=4, pady=2)
         processing_card.columnconfigure(0, weight=1)
         
-        self.processing_label = ttk.Label(processing_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.processing_label = ttk.Label(processing_card, text="0")
         self.processing_label.grid(row=0, column=0, padx=10, pady=5)
 
         # Completed stat card
@@ -146,7 +146,7 @@ class ProgressWidget:
         completed_card.grid(row=0, column=2, sticky="ew", padx=4, pady=2)
         completed_card.columnconfigure(0, weight=1)
         
-        self.completed_label = ttk.Label(completed_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.completed_label = ttk.Label(completed_card, text="0")
         self.completed_label.grid(row=0, column=0, padx=10, pady=5)
 
         # Failed stat card
@@ -154,7 +154,7 @@ class ProgressWidget:
         failed_card.grid(row=0, column=3, sticky="ew", padx=4, pady=2)
         failed_card.columnconfigure(0, weight=1)
         
-        self.failed_label = ttk.Label(failed_card, text="0", font=("Segoe UI", 16, "bold"))
+        self.failed_label = ttk.Label(failed_card, text="0")
         self.failed_label.grid(row=0, column=0, padx=10, pady=5)
 
         # Success rate stat card
@@ -162,7 +162,7 @@ class ProgressWidget:
         success_card.grid(row=0, column=4, sticky="ew", padx=(8, 0), pady=2)
         success_card.columnconfigure(0, weight=1)
         
-        self.success_rate_label = ttk.Label(success_card, text="0%", font=("Segoe UI", 16, "bold"))
+        self.success_rate_label = ttk.Label(success_card, text="0%")
         self.success_rate_label.grid(row=0, column=0, padx=10, pady=5)
 
         # Configure grid weights
@@ -388,7 +388,7 @@ class ProgressWidget:
         ]
 
         for i, (label, value) in enumerate(info_items):
-            ttk.Label(general_frame, text=f"{label}:", font=("Arial", 9, "bold")).grid(
+            ttk.Label(general_frame, text=f"{label}:").grid(
                 row=i, column=0, sticky="w", padx=5, pady=2)
             ttk.Label(general_frame, text=str(value)).grid(
                 row=i, column=1, sticky="w", padx=5, pady=2)
