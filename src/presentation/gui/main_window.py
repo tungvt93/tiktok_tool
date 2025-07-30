@@ -474,10 +474,6 @@ class MainWindowView(BaseView):
         self.stop_processing_btn = ttk.Button(controls_frame, text="⏹️ Stop", state="disabled")
         self.stop_processing_btn.pack(side="left")
 
-        # Progress bar with better styling
-        self.overall_progress = ttk.Progressbar(controls_frame, mode="determinate")
-        self.overall_progress.pack(side="right", fill="x", expand=True, padx=(10, 0))
-
     def _create_processing_queue(self, parent):
         """Create processing queue display with modern styling"""
         queue_frame = ttk.LabelFrame(parent, text="📋 Processing Queue")
@@ -485,7 +481,7 @@ class MainWindowView(BaseView):
         queue_frame.rowconfigure(0, weight=1)
         queue_frame.columnconfigure(0, weight=1)
 
-        # Queue treeview with better column headers
+        # Queue treeview with progress bars instead of percentage
         queue_columns = ("Video", "Status", "Progress", "Time")
         self.queue_tree = ttk.Treeview(queue_frame, columns=queue_columns, show="headings", height=6)
 
@@ -493,7 +489,7 @@ class MainWindowView(BaseView):
         column_configs = [
             ("Video", "🎬 Video", 200),
             ("Status", "📊 Status", 120),
-            ("Progress", "📈 Progress", 100),
+            ("Progress", "📈 Progress", 150),
             ("Time", "⏱️ Time", 100)
         ]
         
@@ -507,6 +503,9 @@ class MainWindowView(BaseView):
 
         self.queue_tree.grid(row=0, column=0, sticky="nsew")
         queue_scrollbar.grid(row=0, column=1, sticky="ns")
+        
+        # Store progress bars for each job
+        self.job_progress_bars = {}
 
     def _create_status_bar(self):
         """Create status bar with modern styling"""
@@ -625,9 +624,13 @@ class MainWindowView(BaseView):
                        rowheight=25)
         
         style.configure("Treeview.Heading",
-                       background=colors['bg_secondary'],
+                       background=colors['accent_primary'],
                        foreground=colors['text_primary'],
                        relief="flat")
+        
+        # Better hover effect for treeview headings
+        style.map("Treeview.Heading",
+                 background=[("active", colors['accent_secondary'])])
         
         style.map("Treeview",
                  background=[("selected", colors['accent_primary'])],
@@ -784,12 +787,18 @@ class MainWindowView(BaseView):
 
     # Processing queue management
     def update_processing_queue(self, jobs: List[ProcessingJobDTO]) -> None:
-        """Update processing queue display with better formatting"""
-        # Clear existing items
+        """Update processing queue display with progress bars"""
+        # Clear existing items and progress bars
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
+        
+        # Clear old progress bars
+        for progress_bar in self.job_progress_bars.values():
+            if hasattr(progress_bar, 'destroy'):
+                progress_bar.destroy()
+        self.job_progress_bars.clear()
 
-        # Add jobs with better status display
+        # Add jobs with progress bars
         for job in jobs:
             # Format status with icons
             status_icons = {
@@ -802,18 +811,79 @@ class MainWindowView(BaseView):
             
             status = status_icons.get(job.status.lower(), job.status.title())
             
+            # Create progress bar text representation
+            progress_text = f"{job.progress:.1f}%"
+            
             values = (
                 job.main_video_name,
                 status,
-                f"{job.progress:.1f}%",
+                progress_text,
                 FormatHelper.format_duration(job.actual_duration or 0)
             )
 
-            self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status))
+            item = self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status))
+            
+            # Create actual progress bar widget
+            self._create_job_progress_bar(job.id, job.progress, item)
+    
+    def _create_job_progress_bar(self, job_id: str, progress: float, tree_item: str):
+        """Create progress bar for a specific job"""
+        # Get the progress column bbox
+        bbox = self.queue_tree.bbox(tree_item, "Progress")
+        if not bbox:
+            return
+            
+        x, y, width, height = bbox
+        
+        # Create progress bar frame
+        progress_frame = tk.Frame(self.queue_tree, bg='#3d3d3d', height=height-4)
+        progress_frame.place(x=x+2, y=y+2, width=width-4, height=height-4)
+        
+        # Create progress bar
+        progress_width = int((width - 4) * progress / 100)
+        if progress_width > 0:
+            progress_bar = tk.Frame(progress_frame, bg='#007acc', width=progress_width, height=height-4)
+            progress_bar.pack(side='left', fill='y')
+        
+        # Store reference
+        self.job_progress_bars[job_id] = progress_frame
+        
+        # Update progress bar when tree scrolls
+        def update_progress_position(*args):
+            bbox = self.queue_tree.bbox(tree_item, "Progress")
+            if bbox:
+                progress_frame.place(x=bbox[0]+2, y=bbox[1]+2, width=bbox[2]-bbox[0]-4, height=bbox[3]-bbox[1]-4)
+        
+        # Bind to scroll events
+        self.queue_tree.bind('<<TreeviewSelect>>', update_progress_position)
+        self.queue_tree.bind('<Configure>', update_progress_position)
+    
+    def update_job_progress(self, job_id: str, progress: float):
+        """Update progress bar for a specific job"""
+        if job_id in self.job_progress_bars:
+            progress_frame = self.job_progress_bars[job_id]
+            
+            # Clear existing progress bar
+            for widget in progress_frame.winfo_children():
+                widget.destroy()
+            
+            # Get current bbox
+            for item in self.queue_tree.get_children():
+                tags = self.queue_tree.item(item, "tags")
+                if tags and tags[0] == job_id:
+                    bbox = self.queue_tree.bbox(item, "Progress")
+                    if bbox:
+                        x, y, width, height = bbox
+                        progress_width = int((width - 4) * progress / 100)
+                        if progress_width > 0:
+                            progress_bar = tk.Frame(progress_frame, bg='#007acc', width=progress_width, height=height-4)
+                            progress_bar.pack(side='left', fill='y')
+                        break
 
     def update_overall_progress(self, progress: float) -> None:
-        """Update overall progress bar"""
-        self.overall_progress['value'] = progress
+        """Update overall progress (removed progress bar)"""
+        # Progress is now shown in individual job progress bars
+        pass
 
     def update_statistics(self, stats_text: str) -> None:
         """Update statistics display with better formatting"""
@@ -911,14 +981,20 @@ class MainWindowView(BaseView):
                 self._create_tooltip(widget, tooltip_text)
 
     def _create_tooltip(self, widget, text):
-        """Create tooltip for widget"""
+        """Create tooltip for widget with better contrast"""
         def show_tooltip(event):
             tooltip = tk.Toplevel()
             tooltip.wm_overrideredirect(True)
             tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
             
-            label = ttk.Label(tooltip, text=text,
-                             background='#2d2d2d', relief='solid', borderwidth=1)
+            # Better contrast colors - dark background with white text
+            label = tk.Label(tooltip, text=text,
+                           background='#1a1a1a', 
+                           foreground='#ffffff',
+                           relief='solid', 
+                           borderwidth=1,
+                           font=("Segoe UI", 9),
+                           padx=8, pady=4)
             label.pack()
             
             def hide_tooltip():
@@ -1228,9 +1304,9 @@ class MainWindowPresenter(BasePresenter):
     def _on_job_progress(self, job_id: str, progress: float) -> None:
         """Handle job progress update"""
         try:
-            # Update progress in the UI (this would update progress bars)
+            # Update progress bar for specific job
             logger.debug(f"Job {job_id} progress: {progress}%")
-            # TODO: Update progress widget with job progress
+            self.view.update_job_progress(job_id, progress)
         except Exception as e:
             logger.error(f"Error updating job progress: {e}")
 
