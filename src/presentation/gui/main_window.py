@@ -519,8 +519,9 @@ class MainWindowView(BaseView):
         self.queue_tree.grid(row=0, column=0, sticky="nsew")
         queue_scrollbar.grid(row=0, column=1, sticky="ns")
         
-        # Store progress bars for each job
-        self.job_progress_bars = {}
+        # Bind events to update progress bar positions
+        self.queue_tree.bind('<<TreeviewSelect>>', self._update_progress_bar_positions)
+        self.queue_tree.bind('<Configure>', self._update_progress_bar_positions)
 
     def _create_status_bar(self):
         """Create status bar with modern styling"""
@@ -803,15 +804,26 @@ class MainWindowView(BaseView):
     # Processing queue management
     def update_processing_queue(self, jobs: List[ProcessingJobDTO]) -> None:
         """Update processing queue display with progress bars"""
-        # Clear existing items and progress bars
+        # Initialize job_progress_bars if not exists
+        if not hasattr(self, 'job_progress_bars'):
+            self.job_progress_bars = {}
+        
+        # Get existing job IDs
+        existing_job_ids = set(self.job_progress_bars.keys())
+        current_job_ids = {job.id for job in jobs}
+        
+        # Remove progress bars for jobs that no longer exist
+        jobs_to_remove = existing_job_ids - current_job_ids
+        for job_id in jobs_to_remove:
+            if job_id in self.job_progress_bars:
+                progress_bar = self.job_progress_bars[job_id]
+                if hasattr(progress_bar, 'destroy'):
+                    progress_bar.destroy()
+                del self.job_progress_bars[job_id]
+        
+        # Clear existing tree items
         for item in self.queue_tree.get_children():
             self.queue_tree.delete(item)
-        
-        # Clear old progress bars
-        for progress_bar in self.job_progress_bars.values():
-            if hasattr(progress_bar, 'destroy'):
-                progress_bar.destroy()
-        self.job_progress_bars.clear()
 
         # Add jobs with progress bars
         for job in jobs:
@@ -826,8 +838,8 @@ class MainWindowView(BaseView):
             
             status = status_icons.get(job.status.lower(), job.status.title())
             
-            # Create progress bar text representation
-            progress_text = f"{job.progress:.1f}%"
+            # Create empty progress text to avoid overlap with progress bar
+            progress_text = ""  # Empty text to avoid overlap
             
             values = (
                 job.main_video_name,
@@ -838,62 +850,164 @@ class MainWindowView(BaseView):
 
             item = self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status))
             
-            # Create actual progress bar widget
-            self._create_job_progress_bar(job.id, job.progress, item)
+            # Only create progress bar if it doesn't exist
+            if job.id not in self.job_progress_bars:
+                self._create_job_progress_bar(job.id, job.progress, item)
+            else:
+                # Update existing progress bar position
+                self._update_progress_bar_position(job.id, item)
     
     def _create_job_progress_bar(self, job_id: str, progress: float, tree_item: str):
-        """Create progress bar for a specific job"""
-        # Get the progress column bbox
-        bbox = self.queue_tree.bbox(tree_item, "Progress")
-        if not bbox:
+        """Create a simple progress bar for a specific job with 4px height"""
+        # Skip if progress bar already exists for this job
+        if job_id in self.job_progress_bars:
             return
             
-        x, y, width, height = bbox
-        
-        # Create progress bar frame
-        progress_frame = tk.Frame(self.queue_tree, bg='#3d3d3d', height=height-4)
-        progress_frame.place(x=x+2, y=y+2, width=width-4, height=height-4)
-        
-        # Create progress bar
-        progress_width = int((width - 4) * progress / 100)
-        if progress_width > 0:
-            progress_bar = tk.Frame(progress_frame, bg='#007acc', width=progress_width, height=height-4)
-            progress_bar.pack(side='left', fill='y')
-        
-        # Store reference
-        self.job_progress_bars[job_id] = progress_frame
-        
-        # Update progress bar when tree scrolls
-        def update_progress_position(*args):
+        try:
+            # Get the progress column bbox
             bbox = self.queue_tree.bbox(tree_item, "Progress")
-            if bbox:
-                progress_frame.place(x=bbox[0]+2, y=bbox[1]+2, width=bbox[2]-bbox[0]-4, height=bbox[3]-bbox[1]-4)
-        
-        # Bind to scroll events
-        self.queue_tree.bind('<<TreeviewSelect>>', update_progress_position)
-        self.queue_tree.bind('<Configure>', update_progress_position)
+            if not bbox:
+                return
+                
+            x, y, width, height = bbox
+            
+            # Create progress bar container frame with border
+            progress_container = tk.Frame(self.queue_tree, bg='#2d2d2d', height=height, relief='flat', bd=1)
+            progress_container.place(x=x, y=y, width=width, height=height)
+            
+            # Calculate progress bar width
+            progress_width = int(width * progress / 100)
+            
+            # Always create progress bar container, even for 0% progress
+            bar_y = (height - 4) // 2
+            
+            # Always create a progress bar, even if width is 0 (for visibility)
+            progress_bar = tk.Frame(
+                progress_container, 
+                bg='#007acc' if progress_width > 0 else '#404040', 
+                width=progress_width if progress_width > 0 else 1, 
+                height=4
+            )
+            progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+            
+            # Add percentage text label on top of progress bar
+            percentage_text = f"{progress:.1f}%" if progress > 0 else ""
+            if percentage_text:
+                text_label = tk.Label(
+                    progress_container,
+                    text=percentage_text,
+                    bg='#2d2d2d',
+                    fg='#ffffff',
+                    font=("Segoe UI", 8),
+                    anchor='center'
+                )
+                text_label.place(x=0, y=0, width=width, height=height)
+            
+            # Store reference
+            self.job_progress_bars[job_id] = progress_container
+            
+        except Exception as e:
+            # Fallback to text if progress bar creation fails
+            pass
+    
+    def _update_progress_bar_position(self, job_id: str, tree_item: str):
+        """Update position of existing progress bar"""
+        if job_id in self.job_progress_bars:
+            try:
+                progress_container = self.job_progress_bars[job_id]
+                bbox = self.queue_tree.bbox(tree_item, "Progress")
+                if bbox:
+                    x, y, width, height = bbox
+                    progress_container.place(x=x, y=y, width=width, height=height)
+            except Exception:
+                pass
     
     def update_job_progress(self, job_id: str, progress: float):
         """Update progress bar for a specific job"""
         if job_id in self.job_progress_bars:
-            progress_frame = self.job_progress_bars[job_id]
+            try:
+                progress_container = self.job_progress_bars[job_id]
+                
+                # Find the job item to get current bbox
+                for item in self.queue_tree.get_children():
+                    tags = self.queue_tree.item(item, "tags")
+                    if tags and tags[0] == job_id:
+                        bbox = self.queue_tree.bbox(item, "Progress")
+                        if bbox:
+                            x, y, width, height = bbox
+                            
+                            # Update container position and size
+                            progress_container.place(x=x, y=y, width=width, height=height)
+                            
+                            # Clear existing progress bar
+                            for widget in progress_container.winfo_children():
+                                widget.destroy()
+                            
+                            # Create new progress bar
+                            progress_width = int(width * progress / 100)
+                            
+                            # Always create progress bar, even for 0% progress
+                            bar_y = (height - 4) // 2
+                            
+                            # Always create a progress bar, even if width is 0 (for visibility)
+                            progress_bar = tk.Frame(
+                                progress_container, 
+                                bg='#007acc' if progress_width > 0 else '#404040', 
+                                width=progress_width if progress_width > 0 else 1, 
+                                height=4
+                            )
+                            progress_bar.place(x=0, y=bar_y, width=progress_width if progress_width > 0 else 1, height=4)
+                            
+                            # Add percentage text label on top of progress bar
+                            percentage_text = f"{progress:.1f}%" if progress > 0 else ""
+                            if percentage_text:
+                                text_label = tk.Label(
+                                    progress_container,
+                                    text=percentage_text,
+                                    bg='#2d2d2d',
+                                    fg='#ffffff',
+                                    font=("Segoe UI", 8),
+                                    anchor='center'
+                                )
+                                text_label.place(x=0, y=0, width=width, height=height)
+                            break
+                            
+            except Exception as e:
+                # Fallback to text update if progress bar update fails
+                self._update_progress_text_fallback(job_id, progress)
+        else:
+            # Fallback to text update if progress bar doesn't exist
+            self._update_progress_text_fallback(job_id, progress)
+    
+    def _update_progress_text_fallback(self, job_id: str, progress: float):
+        """Fallback method to update progress as text"""
+        for item in self.queue_tree.get_children():
+            tags = self.queue_tree.item(item, "tags")
+            if tags and tags[0] == job_id:
+                values = list(self.queue_tree.item(item, "values"))
+                values[2] = ""  # Empty text to avoid overlap with progress bar
+                self.queue_tree.item(item, values=values)
+                break
+    
+    def _update_progress_bar_positions(self, event=None):
+        """Update positions of all progress bars when tree scrolls or resizes"""
+        if not hasattr(self, 'job_progress_bars'):
+            return
             
-            # Clear existing progress bar
-            for widget in progress_frame.winfo_children():
-                widget.destroy()
-            
-            # Get current bbox
-            for item in self.queue_tree.get_children():
-                tags = self.queue_tree.item(item, "tags")
-                if tags and tags[0] == job_id:
-                    bbox = self.queue_tree.bbox(item, "Progress")
-                    if bbox:
-                        x, y, width, height = bbox
-                        progress_width = int((width - 4) * progress / 100)
-                        if progress_width > 0:
-                            progress_bar = tk.Frame(progress_frame, bg='#007acc', width=progress_width, height=height-4)
-                            progress_bar.pack(side='left', fill='y')
+        for job_id, progress_container in self.job_progress_bars.items():
+            try:
+                # Find the corresponding tree item
+                for item in self.queue_tree.get_children():
+                    tags = self.queue_tree.item(item, "tags")
+                    if tags and tags[0] == job_id:
+                        bbox = self.queue_tree.bbox(item, "Progress")
+                        if bbox:
+                            x, y, width, height = bbox
+                            progress_container.place(x=x, y=y, width=width, height=height)
                         break
+            except Exception:
+                # Ignore errors for individual progress bars
+                pass
 
     def update_overall_progress(self, progress: float) -> None:
         """Update overall progress (removed progress bar)"""
@@ -1320,7 +1434,7 @@ class MainWindowPresenter(BasePresenter):
         """Handle job progress update"""
         try:
             # Update progress bar for specific job
-            logger.debug(f"Job {job_id} progress: {progress}%")
+            logger.info(f"Job {job_id} progress: {progress}%")
             self.view.update_job_progress(job_id, progress)
         except Exception as e:
             logger.error(f"Error updating job progress: {e}")
