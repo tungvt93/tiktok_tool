@@ -379,6 +379,9 @@ class MainWindowView(BaseView):
         # Configure columns with better widths and alignment
         self.video_tree.heading("#0", text="☐")
         self.video_tree.column("#0", width=40, minwidth=40, stretch=False)
+        
+        # Bind checkbox click events
+        self.video_tree.bind("<Button-1>", self._on_video_tree_click)
 
         column_configs = {
             "Name": {"width": 250, "minwidth": 150, "anchor": "w"},  # Left align
@@ -522,6 +525,9 @@ class MainWindowView(BaseView):
         # Bind events to update progress bar positions
         self.queue_tree.bind('<<TreeviewSelect>>', self._update_progress_bar_positions)
         self.queue_tree.bind('<Configure>', self._update_progress_bar_positions)
+        
+        # Bind right-click for context menu
+        self.queue_tree.bind('<Button-3>', self._on_queue_right_click)
 
     def _create_status_bar(self):
         """Create status bar with modern styling"""
@@ -749,7 +755,8 @@ class MainWindowView(BaseView):
                 status
             )
 
-            item = self.video_tree.insert("", "end", values=values, tags=(video.path))
+            # Insert with checkbox (☐ = unchecked)
+            item = self.video_tree.insert("", "end", text="☐", values=values, tags=(video.path))
             
             # Update status label
             if videos:
@@ -765,12 +772,15 @@ class MainWindowView(BaseView):
                 )
 
     def get_selected_videos(self) -> List[str]:
-        """Get list of selected video paths"""
+        """Get list of selected video paths (checked checkboxes)"""
         selected = []
-        for item in self.video_tree.selection():
-            tags = self.video_tree.item(item, "tags")
-            if tags:
-                selected.append(tags[0])
+        for item in self.video_tree.get_children():
+            # Check if checkbox is checked
+            checkbox_text = self.video_tree.item(item, "text")
+            if checkbox_text == "☑":  # Checked
+                tags = self.video_tree.item(item, "tags")
+                if tags:
+                    selected.append(tags[0])
         return selected
 
     # Effects management
@@ -852,7 +862,9 @@ class MainWindowView(BaseView):
                 FormatHelper.format_duration(job.actual_duration or 0)
             )
 
-            item = self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status))
+            # Store job metadata in tags: (job_id, status, output_path)
+            output_path = getattr(job, 'output_path', '') or ''
+            item = self.queue_tree.insert("", "end", values=values, tags=(job.id, job.status, output_path))
             
             # Only create progress bar if it doesn't exist
             if job.id not in self.job_progress_bars:
@@ -1206,6 +1218,139 @@ class MainWindowView(BaseView):
             # Restore normal colors
             self._setup_styles()
 
+    def _on_video_tree_click(self, event):
+        """Handle checkbox clicks in video tree"""
+        region = self.video_tree.identify("region", event.x, event.y)
+        if region == "tree":  # Click on checkbox column
+            item = self.video_tree.identify_row(event.y)
+            if item:
+                # Toggle checkbox state
+                current_text = self.video_tree.item(item, "text")
+                if current_text == "☐":  # Unchecked
+                    self.video_tree.item(item, text="☑")
+                else:  # Checked
+                    self.video_tree.item(item, text="☐")
+
+    def _on_queue_right_click(self, event):
+        """Handle right-click on queue items to show context menu"""
+        item = self.queue_tree.identify_row(event.y)
+        if item:
+            # Get job info from the item
+            job_data = self.queue_tree.item(item, "values")
+            if job_data and len(job_data) >= 2:
+                status = job_data[1]  # Status column
+                
+                # Only show context menu for completed jobs
+                if "COMPLETED" in status.upper():
+                    self._show_queue_context_menu(event, item, job_data)
+
+    def _show_queue_context_menu(self, event, item, job_data):
+        """Show context menu for queue items"""
+        context_menu = tk.Menu(self.root, tearoff=0)
+        
+        # Add menu items
+        context_menu.add_command(
+            label="▶️ Play Video", 
+            command=lambda: self._play_video(item, job_data)
+        )
+        context_menu.add_command(
+            label="📁 Open Folder", 
+            command=lambda: self._open_video_folder(item, job_data)
+        )
+        context_menu.add_separator()
+        context_menu.add_command(
+            label="📋 Copy Path", 
+            command=lambda: self._copy_video_path(item, job_data)
+        )
+        
+        # Show menu at cursor position
+        context_menu.tk_popup(event.x_root, event.y_root)
+
+    def _play_video(self, item, job_data):
+        """Play the completed video"""
+        try:
+            import subprocess
+            import platform
+            
+            # Extract video path from job data (assuming it's stored in the item)
+            video_name = job_data[0]  # Video name column
+            
+            # Find the output file path
+            output_path = self._get_output_path_for_job(item)
+            if output_path and output_path.exists():
+                # Open video with default system player
+                if platform.system() == "Darwin":  # macOS
+                    subprocess.run(["open", str(output_path)])
+                elif platform.system() == "Windows":
+                    subprocess.run(["start", str(output_path)], shell=True)
+                else:  # Linux
+                    subprocess.run(["xdg-open", str(output_path)])
+            else:
+                self.show_error_notification("Video file not found")
+        except Exception as e:
+            self.show_error_notification(f"Error playing video: {str(e)}")
+
+    def _open_video_folder(self, item, job_data):
+        """Open folder containing the video"""
+        try:
+            import subprocess
+            import platform
+            from pathlib import Path
+            
+            # Find the output file path
+            output_path = self._get_output_path_for_job(item)
+            if output_path and output_path.exists():
+                folder_path = output_path.parent
+                
+                # Open folder with default file manager
+                if platform.system() == "Darwin":  # macOS
+                    subprocess.run(["open", str(folder_path)])
+                elif platform.system() == "Windows":
+                    subprocess.run(["explorer", str(folder_path)])
+                else:  # Linux
+                    subprocess.run(["xdg-open", str(folder_path)])
+            else:
+                self.show_error_notification("Video file not found")
+        except Exception as e:
+            self.show_error_notification(f"Error opening folder: {str(e)}")
+
+    def _copy_video_path(self, item, job_data):
+        """Copy video file path to clipboard"""
+        try:
+            output_path = self._get_output_path_for_job(item)
+            if output_path and output_path.exists():
+                self.root.clipboard_clear()
+                self.root.clipboard_append(str(output_path))
+                self.show_success_notification("Video path copied to clipboard")
+            else:
+                self.show_error_notification("Video file not found")
+        except Exception as e:
+            self.show_error_notification(f"Error copying path: {str(e)}")
+
+    def _get_output_path_for_job(self, item):
+        """Get output file path for a job item"""
+        try:
+            from pathlib import Path
+            
+            # Get job metadata from tags
+            tags = self.queue_tree.item(item, "tags")
+            if len(tags) >= 3:
+                output_path_str = tags[2]  # output_path is stored in 3rd tag
+                if output_path_str:
+                    output_path = Path(output_path_str)
+                    if output_path.exists():
+                        return output_path
+            
+            # Fallback: look for the most recent file in output directory
+            output_dir = Path("output")
+            if output_dir.exists():
+                files = list(output_dir.glob("*.mp4"))
+                if files:
+                    return max(files, key=lambda f: f.stat().st_mtime)
+            return None
+        except Exception:
+            return None
+
 
 class MainWindowPresenter(BasePresenter):
     """Presenter for main window"""
@@ -1464,13 +1609,14 @@ class MainWindowPresenter(BasePresenter):
             self.handle_error(e, "stopping processing")
 
     def _on_select_all(self) -> None:
-        """Handle select all button"""
+        """Handle select all button - check all checkboxes"""
         for item in self.view.video_tree.get_children():
-            self.view.video_tree.selection_add(item)
+            self.view.video_tree.item(item, text="☑")
 
     def _on_clear_selection(self) -> None:
-        """Handle clear selection button"""
-        self.view.video_tree.selection_remove(self.view.video_tree.selection())
+        """Handle clear selection button - uncheck all checkboxes"""
+        for item in self.view.video_tree.get_children():
+            self.view.video_tree.item(item, text="☐")
 
     def _on_job_progress(self, job_id: str, progress: float) -> None:
         """Handle job progress update"""
