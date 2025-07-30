@@ -9,6 +9,7 @@ pytest-cov>=4.0.0
 pytest-mock>=3.10.0
 numpy
 Pillow
+opencv-python>=4.8.0
 
 # Development dependencies
 black>=22.0.0

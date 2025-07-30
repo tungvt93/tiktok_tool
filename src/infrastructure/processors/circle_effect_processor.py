@@ -1,14 +1,21 @@
 """
 Circle Effect Processor
 
-Implementation of circle-based video effects.
+Implementation of circle-based video effects using numpy masks and OpenCV.
+Based on the working implementation from old_logic.
 """
 
 import logging
-from pathlib import Path
-from typing import List
+import tempfile
+import os
 import subprocess
 import math
+from pathlib import Path
+from typing import List, Callable
+import time
+
+import cv2
+import numpy as np
 
 from ...domain.entities.video import Video
 from ...domain.entities.effect import Effect
@@ -20,8 +27,107 @@ from ...shared.exceptions import EffectProcessingException
 logger = logging.getLogger(__name__)
 
 
+class CircleMaskGenerator:
+    """Generate circle masks using numpy and OpenCV (from old_logic)"""
+    
+    def __init__(self, width: int, height: int, duration: float):
+        self.width = width
+        self.height = height
+        self.duration = duration
+        self.center_x = width // 2
+        self.center_y = height // 2
+        self.max_radius = int(np.hypot(width, height))
+    
+    def circle_expand_mask(self, t: float) -> np.ndarray:
+        """Create expanding circle mask"""
+        mask = np.zeros((self.height, self.width), dtype=np.float32)
+        progress = min(1, t / self.duration)
+        radius = int(progress * self.max_radius)
+        
+        Y, X = np.ogrid[:self.height, :self.width]
+        circle = (X - self.center_x)**2 + (Y - self.center_y)**2 <= radius**2
+        mask[circle] = 1
+        return mask
+    
+    def circle_shrink_mask(self, t: float) -> np.ndarray:
+        """Create shrinking circle mask - black background with shrinking circle revealing video"""
+        mask = np.zeros((self.height, self.width), dtype=np.float32)
+        progress = min(1, t / self.duration)
+        radius = int((1 - progress) * self.max_radius)
+        
+        Y, X = np.ogrid[:self.height, :self.width]
+        circle = (X - self.center_x)**2 + (Y - self.center_y)**2 <= radius**2
+        
+        # Mask = 1 outside circle (black background), 0 inside circle (video visible)
+        mask[~circle] = 1  # Outside circle = black background
+        mask[circle] = 0   # Inside circle = video visible
+        return mask
+    
+    def circle_rotate_mask(self, t: float, clockwise: bool = True) -> np.ndarray:
+        """Create rotating circle mask"""
+        mask = np.zeros((self.height, self.width), dtype=np.float32)
+        progress = min(1, t / self.duration)
+        sweep_angle = progress * 2 * np.pi
+        if not clockwise:
+            sweep_angle = -sweep_angle
+        
+        Y, X = np.ogrid[:self.height, :self.width]
+        angles = np.arctan2(Y - self.center_y, X - self.center_x) % (2 * np.pi)
+        radius = np.hypot(X - self.center_x, Y - self.center_y)
+        
+        # Normalize angles for comparison
+        if clockwise:
+            # For clockwise, we want angles from 0 to sweep_angle
+            angle_condition = angles <= sweep_angle
+        else:
+            # For counter-clockwise, we want angles from (2*pi - sweep_angle) to 2*pi
+            angle_condition = angles >= (2 * np.pi + sweep_angle) % (2 * np.pi)
+        
+        mask[(angle_condition) & (radius <= self.max_radius)] = 1
+        return mask
+    
+    def create_mask_video(self, mask_func: Callable, output_path: str, input_video: str, fps: int = 30) -> bool:
+        """Create a video from mask function"""
+        try:
+            # Get input video duration
+            result = subprocess.run([
+                "ffprobe", "-v", "error", "-show_entries", "format=duration", 
+                "-of", "default=noprint_wrappers=1:nokey=1", input_video
+            ], capture_output=True, text=True, check=True)
+            
+            input_duration = float(result.stdout.strip())
+            total_frames = int(input_duration * fps)
+            
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (self.width, self.height))
+            
+            for frame_idx in range(total_frames):
+                t = frame_idx / fps
+                
+                # Apply effect only during the specified duration
+                if t <= self.duration:
+                    mask = mask_func(t)
+                else:
+                    # After effect duration, show full video (all pixels visible)
+                    mask = np.ones((self.height, self.width), dtype=np.float32)
+                
+                # Convert to 8-bit RGB (3 channels)
+                mask_8bit = (mask * 255).astype(np.uint8)
+                mask_rgb = np.stack([mask_8bit, mask_8bit, mask_8bit], axis=2)  # Convert to RGB
+                
+                # Write frame
+                out.write(mask_rgb)
+            
+            out.release()
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error creating mask video: {e}")
+            return False
+
+
 class CircleEffectProcessor(IEffectProcessor):
-    """Processor for circle-based effects"""
+    """Processor for circle-based effects using numpy masks"""
 
     def __init__(self, ffmpeg_config: FFmpegConfig):
         """
@@ -46,7 +152,7 @@ class CircleEffectProcessor(IEffectProcessor):
 
     def apply_effect(self, input_video: Video, effect: Effect, output_path: Path) -> EffectResult:
         """
-        Apply a circle effect to a video.
+        Apply a circle effect to a video using numpy masks.
 
         Args:
             input_video: The input video to process
@@ -56,7 +162,6 @@ class CircleEffectProcessor(IEffectProcessor):
         Returns:
             EffectResult with processing outcome
         """
-        import time
         start_time = time.time()
 
         try:
@@ -76,22 +181,8 @@ class CircleEffectProcessor(IEffectProcessor):
                     input_video.path
                 )
 
-            # Try to use external circle effects processor if available
-            try:
-                success = self._apply_with_external_processor(input_video, effect, output_path)
-                if success:
-                    processing_time = time.time() - start_time
-                    return EffectResult(
-                        success=True,
-                        output_path=output_path,
-                        processing_time=processing_time
-                    )
-            except ImportError:
-                logger.info("External circle processor not available, using FFmpeg fallback")
-
-            # Fallback to FFmpeg implementation
-            cmd = self._build_circle_command(input_video, effect, output_path)
-            success = self._run_ffmpeg_command(cmd)
+            # Apply circle effect using mask approach
+            success = self._apply_circle_effect_with_mask(input_video, effect, output_path)
 
             processing_time = time.time() - start_time
 
@@ -104,71 +195,58 @@ class CircleEffectProcessor(IEffectProcessor):
             else:
                 return EffectResult(
                     success=False,
-                    error_message="FFmpeg command failed",
-                    processing_time=processing_time
+                    output_path=None,
+                    processing_time=processing_time,
+                    error_message="Failed to apply circle effect"
                 )
 
         except Exception as e:
             processing_time = time.time() - start_time
-            logger.error(f"Error applying circle effect {effect.type.value}: {e}")
+            logger.error(f"Error applying circle effect: {e}")
             return EffectResult(
                 success=False,
-                error_message=str(e),
-                processing_time=processing_time
+                output_path=None,
+                processing_time=processing_time,
+                error_message=str(e)
             )
 
     def get_supported_effects(self) -> List[EffectType]:
         """
-        Get list of effect types supported by this processor.
+        Get list of supported effect types.
 
         Returns:
-            List of supported EffectType values
+            List of supported effect types
         """
-        return EffectType.get_circle_effects()
+        return [
+            EffectType.CIRCLE_EXPAND,
+            EffectType.CIRCLE_CONTRACT,
+            EffectType.CIRCLE_ROTATE_CW,
+            EffectType.CIRCLE_ROTATE_CCW
+        ]
 
     def validate_effect_parameters(self, effect: Effect) -> List[str]:
         """
-        Validate effect parameters for this processor.
+        Validate effect parameters.
 
         Args:
             effect: The effect to validate
 
         Returns:
-            List of validation error messages (empty if valid)
+            List of validation errors (empty if valid)
         """
         errors = []
 
-        if not self.can_handle(effect.type):
-            errors.append(f"Effect type {effect.type.value} not supported")
-            return errors
-
-        # Validate duration
         if effect.duration <= 0:
             errors.append("Duration must be positive")
-        elif effect.duration > 10:
-            errors.append("Duration too long (max 10 seconds)")
 
-        # Validate radius parameter if present
-        radius = effect.get_parameter('radius')
-        if radius is not None:
-            if not isinstance(radius, (int, float)) or radius <= 0:
-                errors.append("Radius must be a positive number")
-            elif radius > 1000:
-                errors.append("Radius too large (max 1000)")
-
-        # Validate center point if present
-        center_x = effect.get_parameter('center_x')
-        center_y = effect.get_parameter('center_y')
-        if center_x is not None and (not isinstance(center_x, (int, float)) or center_x < 0):
-            errors.append("Center X must be a non-negative number")
-        if center_y is not None and (not isinstance(center_y, (int, float)) or center_y < 0):
-            errors.append("Center Y must be a non-negative number")
+        if effect.duration > 30:  # Reasonable limit
+            errors.append("Duration too long (max 30 seconds)")
 
         return errors
 
     def estimate_processing_time(self, video: Video, effect: Effect) -> float:
         """
-        Estimate processing time for applying an effect.
+        Estimate processing time for the effect.
 
         Args:
             video: The video to process
@@ -177,156 +255,116 @@ class CircleEffectProcessor(IEffectProcessor):
         Returns:
             Estimated processing time in seconds
         """
-        if not self.can_handle(effect.type):
-            return 0.0
-
-        # Circle effects are more complex than slide effects
-        base_time = video.duration * 0.4  # 40% of video duration
-
-        # Add complexity factors
-        complexity_factor = 1.0
-
-        # Longer effects take more time
-        if effect.duration > 3:
-            complexity_factor *= 1.3
-
-        # Custom radius or center point adds complexity
-        if effect.get_parameter('radius') or effect.get_parameter('center_x'):
-            complexity_factor *= 1.2
-
-        # Rotation effects are more complex
-        if effect.type in [EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
-            complexity_factor *= 1.5
-
-        return base_time * complexity_factor
+        # Base time for mask generation + FFmpeg processing
+        base_time = 2.0
+        
+        # Add time based on video duration and effect complexity
+        duration_factor = video.duration / 10.0  # Normalize to 10 seconds
+        complexity_factor = 1.5 if effect.type in [EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW] else 1.0
+        
+        return base_time + (duration_factor * complexity_factor)
 
     def get_processor_name(self) -> str:
         """
-        Get the name of this effect processor.
+        Get the name of this processor.
 
         Returns:
-            Human-readable processor name
+            Processor name
         """
-        return "Circle Effect Processor"
+        return "CircleEffectProcessor"
 
-    def _apply_with_external_processor(self, input_video: Video, effect: Effect, output_path: Path) -> bool:
-        """Try to apply effect using external circle effects processor"""
+    def _apply_circle_effect_with_mask(self, input_video: Video, effect: Effect, output_path: Path) -> bool:
+        """Apply circle effect using mask approach (from old_logic)"""
         try:
-            # This would import the external processor if available
-            from circle_effects_processor import CircleEffectsProcessor
-
-            width = input_video.dimensions.width
-            height = input_video.dimensions.height
-            duration = effect.duration
-
-            processor = CircleEffectsProcessor(width, height, duration, str(input_video.path))
-
-            # Map effect types to processor methods
-            effect_type_map = {
-                EffectType.CIRCLE_EXPAND: "expand",
-                EffectType.CIRCLE_CONTRACT: "shrink",
-                EffectType.CIRCLE_ROTATE_CW: "rotate_cw",
-                EffectType.CIRCLE_ROTATE_CCW: "rotate_ccw"
-            }
-
-            effect_type_str = effect_type_map.get(effect.type)
-            if not effect_type_str:
-                return False
-
-            return processor.apply_circle_effect(
-                str(input_video.path),
-                str(output_path),
-                effect_type_str
-            )
-
-        except ImportError:
-            raise  # Re-raise to indicate external processor not available
+            # Create temporary directory
+            with tempfile.TemporaryDirectory() as temp_dir:
+                mask_video = os.path.join(temp_dir, "mask.mp4")
+                
+                # Create mask generator
+                mask_generator = CircleMaskGenerator(
+                    input_video.dimensions.width,
+                    input_video.dimensions.height,
+                    effect.duration
+                )
+                
+                # Create mask based on effect type
+                effect_type_map = {
+                    EffectType.CIRCLE_EXPAND: mask_generator.circle_expand_mask,
+                    EffectType.CIRCLE_CONTRACT: mask_generator.circle_shrink_mask,
+                    EffectType.CIRCLE_ROTATE_CW: lambda t: mask_generator.circle_rotate_mask(t, clockwise=True),
+                    EffectType.CIRCLE_ROTATE_CCW: lambda t: mask_generator.circle_rotate_mask(t, clockwise=False)
+                }
+                
+                mask_func = effect_type_map.get(effect.type)
+                if not mask_func:
+                    logger.error(f"Unknown effect type: {effect.type}")
+                    return False
+                
+                # Create mask video
+                success = mask_generator.create_mask_video(
+                    mask_func, 
+                    mask_video, 
+                    str(input_video.path)
+                )
+                
+                if not success:
+                    return False
+                
+                # Apply mask to video using FFmpeg
+                cmd = self._build_mask_command(
+                    str(input_video.path),
+                    mask_video,
+                    str(output_path),
+                    input_video.dimensions.width,
+                    input_video.dimensions.height
+                )
+                
+                return self._run_ffmpeg_command(cmd)
+                
         except Exception as e:
-            logger.warning(f"External circle processor failed: {e}")
+            logger.error(f"Error applying circle effect with mask: {e}")
             return False
 
-    def _build_circle_command(self, input_video: Video, effect: Effect, output_path: Path) -> List[str]:
-        """Build FFmpeg command for circle effect (fallback implementation)"""
-        cmd = ["ffmpeg", "-y", "-i", str(input_video.path)]
-
-        # Build circle filter based on effect type
-        circle_filter = self._build_circle_filter(effect, input_video.dimensions)
-
-        cmd.extend([
-            "-filter_complex", circle_filter,
+    def _build_mask_command(self, input_video: str, mask_video: str, output_video: str, width: int, height: int) -> List[str]:
+        """Build FFmpeg command for applying mask to video"""
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", input_video,
+            "-i", mask_video,
+            "-filter_complex",
+            f"color=black:{width}x{height}[bg];"
+            f"[0:v]scale={width}:{height}[video];"
+            f"[1:v]scale={width}:{height}[mask];"
+            f"[video][mask]alphamerge[alpha];"
+            f"[bg][alpha]overlay=shortest=1",
             "-c:v", self.ffmpeg_config.codec_video,
             "-preset", self.ffmpeg_config.preset,
             "-c:a", "copy",  # Copy audio without re-encoding
-            str(output_path)
-        ])
-
+            output_video
+        ]
+        
         return cmd
 
-    def _build_circle_filter(self, effect: Effect, dimensions) -> str:
-        """Build FFmpeg filter for circle effect (simplified fallback)"""
-        width = dimensions.width
-        height = dimensions.height
-        duration = effect.duration
-
-        # Get center point (default to center of video)
-        center_x = effect.get_parameter('center_x', width // 2)
-        center_y = effect.get_parameter('center_y', height // 2)
-
-        # Calculate maximum radius (distance to farthest corner)
-        max_radius = math.sqrt(
-            max(center_x, width - center_x) ** 2 +
-            max(center_y, height - center_y) ** 2
-        )
-
-        # Get custom radius or use calculated max
-        radius = effect.get_parameter('radius', max_radius)
-
-        if effect.type == EffectType.CIRCLE_EXPAND:
-            # Start with small circle and expand
-            radius_expr = f"if(lt(t,{duration}), {radius}*t/{duration}, {radius})"
-
-        elif effect.type == EffectType.CIRCLE_CONTRACT:
-            # Start with full circle and contract
-            radius_expr = f"if(lt(t,{duration}), {radius}*(1-t/{duration}), 0)"
-
-        elif effect.type in [EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
-            # Rotating circle mask (simplified)
-            rotation_speed = 360 / duration  # degrees per second
-            direction = 1 if effect.type == EffectType.CIRCLE_ROTATE_CW else -1
-            radius_expr = str(radius)
-
-        else:
-            # Fallback - no effect
-            return "[0:v]copy[v]"
-
-        # Create circular mask using geq filter (simplified approach)
-        # This is a basic implementation - the external processor would be much better
-        mask_filter = (
-            f"geq=r='if(lt(sqrt(pow(X-{center_x},2)+pow(Y-{center_y},2)),{radius_expr}),255,0)':"
-            f"g='if(lt(sqrt(pow(X-{center_x},2)+pow(Y-{center_y},2)),{radius_expr}),255,0)':"
-            f"b='if(lt(sqrt(pow(X-{center_x},2)+pow(Y-{center_y},2)),{radius_expr}),255,0)'"
-        )
-
-        return f"[0:v]{mask_filter}[v]"
-
     def _run_ffmpeg_command(self, cmd: List[str]) -> bool:
-        """Execute FFmpeg command"""
+        """Run FFmpeg command"""
         try:
-            logger.debug(f"Running circle effect command: {' '.join(cmd[:5])}...")
-
+            logger.debug(f"Running FFmpeg command: {' '.join(cmd)}")
+            
             result = subprocess.run(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
-                check=True
+                timeout=300  # 5 minutes timeout
             )
-
-            logger.debug("Circle effect applied successfully")
+            
+            if result.returncode != 0:
+                logger.error(f"FFmpeg command failed: {result.stderr}")
+                return False
+            
             return True
-
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg command failed: {e.stderr}")
+            
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg command timed out")
             return False
         except Exception as e:
             logger.error(f"Error running FFmpeg command: {e}")

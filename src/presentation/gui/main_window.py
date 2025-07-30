@@ -159,22 +159,43 @@ class MainWindowView(BaseView):
         effects_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
         effects_frame.columnconfigure(1, weight=1)
 
+        # Opening Effects Section
+        opening_frame = ttk.LabelFrame(effects_frame, text="Opening Effects")
+        opening_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        opening_frame.columnconfigure(1, weight=1)
+
         # Effect type
-        ttk.Label(effects_frame, text="Effect Type:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(opening_frame, text="Effect Type:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
         self.effect_var = tk.StringVar(value="none")
-        self.effect_combo = ttk.Combobox(effects_frame, textvariable=self.effect_var, state="readonly")
+        self.effect_combo = ttk.Combobox(opening_frame, textvariable=self.effect_var, state="readonly")
         self.effect_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
         # Duration
-        ttk.Label(effects_frame, text="Duration (s):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        ttk.Label(opening_frame, text="Duration (s):").grid(row=1, column=0, sticky="w", padx=5, pady=2)
         self.duration_var = tk.StringVar(value="2.0")
-        duration_spin = ttk.Spinbox(effects_frame, from_=0.5, to=10.0, increment=0.5, textvariable=self.duration_var)
+        duration_spin = ttk.Spinbox(opening_frame, from_=0.5, to=10.0, increment=0.5, textvariable=self.duration_var)
         duration_spin.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
         # Random effect
         self.random_effect_var = tk.BooleanVar()
-        random_check = ttk.Checkbutton(effects_frame, text="Use Random Effects", variable=self.random_effect_var)
+        random_check = ttk.Checkbutton(opening_frame, text="Use Random Effects", variable=self.random_effect_var)
         random_check.grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+
+        # GIF Effects Section
+        gif_frame = ttk.LabelFrame(effects_frame, text="GIF Effects")
+        gif_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+        gif_frame.columnconfigure(1, weight=1)
+
+        # GIF selection
+        ttk.Label(gif_frame, text="GIF Effect:").grid(row=0, column=0, sticky="w", padx=5, pady=2)
+        self.gif_var = tk.StringVar(value="none")
+        self.gif_combo = ttk.Combobox(gif_frame, textvariable=self.gif_var, state="readonly")
+        self.gif_combo.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+
+        # Random GIF
+        self.random_gif_var = tk.BooleanVar()
+        random_gif_check = ttk.Checkbutton(gif_frame, text="Use Random GIF", variable=self.random_gif_var)
+        random_gif_check.grid(row=1, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
     def _create_processing_controls(self, parent):
         """Create processing control buttons"""
@@ -297,6 +318,18 @@ class MainWindowView(BaseView):
         """Get selected effect type"""
         return self.effect_var.get()
 
+    def update_gif_options(self, gifs: List[str]) -> None:
+        """Update available GIF options"""
+        self.gif_combo['values'] = gifs
+
+    def get_selected_gif(self) -> str:
+        """Get selected GIF effect"""
+        return self.gif_var.get()
+
+    def is_random_gif_enabled(self) -> bool:
+        """Check if random GIF is enabled"""
+        return self.random_gif_var.get()
+
     def get_effect_duration(self) -> float:
         """Get effect duration"""
         try:
@@ -403,11 +436,34 @@ class MainWindowPresenter(BasePresenter):
     def _load_effects(self) -> None:
         """Load available effects"""
         try:
+            # Load opening effects
             available_effects = self.effect_service.get_available_effects()
             effect_names = [effect.value for effect in available_effects]
             self.view.update_effect_options(effect_names)
+            
+            # Load GIF effects
+            self._load_gif_effects()
         except Exception as e:
             self.handle_error(e, "loading effects")
+
+    def _load_gif_effects(self) -> None:
+        """Load available GIF effects"""
+        try:
+            import glob
+            from pathlib import Path
+            
+            # Get GIF files from effects directory
+            effects_dir = self.config.paths.effects_dir if hasattr(self.config.paths, 'effects_dir') else Path("effects")
+            gif_files = glob.glob(str(effects_dir / "*.gif"))
+            
+            # Extract filenames
+            gif_names = ["none"] + [Path(gif).name for gif in gif_files]
+            self.view.update_gif_options(gif_names)
+            
+            logger.info(f"Loaded {len(gif_files)} GIF effects")
+        except Exception as e:
+            logger.error(f"Error loading GIF effects: {e}")
+            self.view.update_gif_options(["none"])
 
     def _start_queue_monitoring(self) -> None:
         """Start monitoring processing queue"""
@@ -465,52 +521,107 @@ class MainWindowPresenter(BasePresenter):
                 self.view.show_error("No background videos found")
                 return
 
-            # Create processing jobs
+            # Create and submit processing jobs
             import random
+            from ...domain.entities.processing_job import ProcessingJob
+            from ...domain.entities.video import Video
+            from ...domain.entities.effect import Effect
+            from ...domain.value_objects.effect_type import EffectType
+            from ...application.services.processing_service import JobProgressCallback
+            
+            jobs_submitted = 0
+            
             for video_path in selected_paths:
                 # Find video DTO
-                video_dto = next((v for v in self._current_videos if v.path == video_path), None)
+                video_dto = next((v for v in self._current_videos if str(v.path) == str(video_path)), None)
                 if not video_dto:
+                    logger.warning(f"Video DTO not found for path: {video_path}")
                     continue
 
                 # Select random background
                 bg_video = random.choice(background_videos)
 
-                # Create output path
-                output_path = self.config.paths.output_dir / f"processed_{video_dto.filename}"
+                # Create unique output path with timestamp
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename_without_ext = Path(video_dto.filename).stem
+                output_path = self.config.paths.output_dir / f"processed_{filename_without_ext}_{timestamp}.mp4"
+
+                # Create Video entities
+                main_video = Video(
+                    path=Path(video_path),
+                    duration=video_dto.duration,
+                    dimensions=video_dto.dimensions
+                )
+                
+                background_video = Video(
+                    path=bg_video.path,
+                    duration=bg_video.duration,
+                    dimensions=bg_video.dimensions
+                )
 
                 # Create effects
                 effects = []
+                
+                # Add opening effect
                 if self.view.is_random_effects_enabled():
-                    effect = self.effect_service.create_random_effect()
-                    effects.append({
-                        'type': effect.type.value,
-                        'duration': effect.duration,
-                        'parameters': effect.parameters
-                    })
+                    effect_dto = self.effect_service.create_random_effect()
+                    effect = Effect(
+                        type=effect_dto.type,
+                        duration=effect_dto.duration,
+                        parameters=effect_dto.parameters
+                    )
+                    effects.append(effect)
                 else:
-                    effect_type = self.view.get_selected_effect()
-                    if effect_type != "none":
-                        effects.append({
-                            'type': effect_type,
-                            'duration': self.view.get_effect_duration(),
-                            'parameters': {}
-                        })
+                    effect_type_str = self.view.get_selected_effect()
+                    if effect_type_str != "none":
+                        # Convert string to EffectType enum
+                        effect_type = EffectType(effect_type_str)
+                        effect = Effect(
+                            type=effect_type,
+                            duration=self.view.get_effect_duration(),
+                            parameters={}
+                        )
+                        effects.append(effect)
 
-                # Create and submit job
-                request = ProcessVideoRequest(
-                    main_video_path=Path(video_path),
-                    background_video_path=bg_video.path,
-                    output_path=output_path,
-                    effects=effects
+                # Add GIF effect
+                gif_path = self._get_selected_gif_path()
+                if gif_path:
+                    # Create a GIF overlay effect (use video duration or default to 10 seconds)
+                    gif_duration = video_dto.duration if video_dto.duration > 0 else 10.0
+                    gif_effect = Effect(
+                        type=EffectType.GIF_OVERLAY,
+                        duration=gif_duration,  # Use video duration for GIF overlay
+                        parameters={'gif_path': str(gif_path)}
+                    )
+                    effects.append(gif_effect)
+
+                # Create processing job
+                job = ProcessingJob(
+                    main_video=main_video,
+                    background_video=background_video,
+                    effects=effects,
+                    output_path=output_path
                 )
 
-                # Execute processing (this would be async in real implementation)
-                response = self.process_video_use_case.execute(request)
-                if not response.success:
-                    self.view.show_error(f"Failed to process {video_dto.filename}: {response.error_message}")
+                # Create progress callback
+                callback = JobProgressCallback(
+                    on_progress=lambda job_id, progress: self._on_job_progress(job_id, progress),
+                    on_status_change=lambda job_id, status: self._on_job_status_change(job_id, status),
+                    on_complete=lambda job_id, success: self._on_job_complete(job_id, success)
+                )
 
-            self.view.show_success("Processing started")
+                # Submit job to processing service
+                job_id = self.processing_service.submit_job(job, callback)
+                jobs_submitted += 1
+                logger.info(f"Submitted job {job_id} for video {video_dto.filename}")
+
+            if jobs_submitted > 0:
+                self.view.show_success(f"Processing started - {jobs_submitted} job(s) queued")
+                # Start queue monitoring
+                self._start_queue_monitoring()
+            else:
+                self.view.show_error("No jobs were created")
 
         except Exception as e:
             self.handle_error(e, "starting processing")
@@ -531,3 +642,55 @@ class MainWindowPresenter(BasePresenter):
     def _on_clear_selection(self) -> None:
         """Handle clear selection button"""
         self.view.video_tree.selection_remove(self.view.video_tree.selection())
+
+    def _on_job_progress(self, job_id: str, progress: float) -> None:
+        """Handle job progress update"""
+        try:
+            # Update progress in the UI (this would update progress bars)
+            logger.debug(f"Job {job_id} progress: {progress}%")
+            # TODO: Update progress widget with job progress
+        except Exception as e:
+            logger.error(f"Error updating job progress: {e}")
+
+    def _on_job_status_change(self, job_id: str, status) -> None:
+        """Handle job status change"""
+        try:
+            logger.info(f"Job {job_id} status changed to: {status}")
+            # TODO: Update progress widget with job status
+        except Exception as e:
+            logger.error(f"Error updating job status: {e}")
+
+    def _on_job_complete(self, job_id: str, success: bool) -> None:
+        """Handle job completion"""
+        try:
+            if success:
+                logger.info(f"Job {job_id} completed successfully")
+                # TODO: Update UI to show completion
+            else:
+                logger.error(f"Job {job_id} failed")
+                # TODO: Update UI to show failure
+        except Exception as e:
+            logger.error(f"Error handling job completion: {e}")
+
+    def _get_selected_gif_path(self) -> Optional[Path]:
+        """Get the path to the selected GIF effect"""
+        try:
+            if self.view.is_random_gif_enabled():
+                # Select random GIF
+                import glob
+                from pathlib import Path
+                effects_dir = self.config.paths.effects_dir if hasattr(self.config.paths, 'effects_dir') else Path("effects")
+                gif_files = glob.glob(str(effects_dir / "*.gif"))
+                if gif_files:
+                    import random
+                    return Path(random.choice(gif_files))
+            else:
+                # Get selected GIF
+                selected_gif = self.view.get_selected_gif()
+                if selected_gif != "none":
+                    effects_dir = self.config.paths.effects_dir if hasattr(self.config.paths, 'effects_dir') else Path("effects")
+                    return effects_dir / selected_gif
+            return None
+        except Exception as e:
+            logger.error(f"Error getting selected GIF path: {e}")
+            return None

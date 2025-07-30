@@ -6,6 +6,7 @@ Concrete implementation of video processing using FFmpeg.
 
 import subprocess
 import logging
+import threading
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from functools import lru_cache
@@ -36,65 +37,48 @@ class FFmpegService(IVideoProcessor):
         self.video_config = video_config
         self.ffmpeg_config = ffmpeg_config
         self._active_processes: Dict[str, subprocess.Popen] = {}
+        # Limit concurrent FFmpeg processes to prevent system overload
+        self._ffmpeg_semaphore = threading.Semaphore(2)  # Max 2 concurrent FFmpeg processes
 
     def process_video(self, job: ProcessingJob) -> ProcessingResult:
-        """
-        Process a video according to the job specification.
-
-        Args:
-            job: The processing job containing all configuration
-
-        Returns:
-            ProcessingResult with success status and output information
-        """
-        import time
-        start_time = time.time()
-
+        """Process a video with effects"""
         try:
-            # Validate job
-            validation_errors = job.validate_for_processing()
-            if validation_errors:
-                error_msg = f"Job validation failed: {'; '.join(validation_errors)}"
-                return ProcessingResult(False, error_message=error_msg)
-
-            # Create output directory
-            job.output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Build FFmpeg command
-            cmd = self._build_processing_command(job)
-
-            # Execute command
-            success = self._run_ffmpeg_command(cmd, job.id)
-
-            if success:
-                # Verify output file was created
-                if job.output_path.exists() and job.output_path.stat().st_size > 0:
-                    processing_time = time.time() - start_time
-                    perf_logger.log_processing_time(
-                        "video_processing",
-                        processing_time,
-                        str(job.main_video.path),
-                        job_id=job.id,
-                        effects_count=len(job.effects)
-                    )
-
-                    return ProcessingResult(
-                        True,
-                        output_path=job.output_path,
-                        metadata={
-                            'processing_time': processing_time,
-                            'effects_applied': len(job.effects),
-                            'output_size': job.output_path.stat().st_size
-                        }
-                    )
-                else:
-                    return ProcessingResult(False, error_message="Output file was not created or is empty")
-            else:
+            logger.info(f"Processing video: {job.main_video.path}")
+            
+            # Step 1: Render video with hstack and GIF overlay (like old logic)
+            temp_output = job.output_path.with_suffix('.temp.mp4')
+            
+            # Build command for step 1 (video merge + GIF overlay)
+            cmd = self._build_processing_command(job, temp_output)
+            
+            # Execute step 1
+            if not self._run_ffmpeg_command(cmd, job.id):
                 return ProcessingResult(False, error_message="FFmpeg processing failed")
-
+            
+            # Step 2: Apply opening effects (like old logic)
+            if self._has_opening_effects(job):
+                success = self._apply_opening_effects(temp_output, job.output_path, job)
+                # Clean up temp file
+                try:
+                    temp_output.unlink()
+                except:
+                    pass
+                if not success:
+                    return ProcessingResult(False, error_message="Opening effect processing failed")
+            else:
+                # No opening effects, just rename temp file
+                try:
+                    temp_output.rename(job.output_path)
+                except Exception as e:
+                    logger.error(f"Failed to rename temp file: {e}")
+                    return ProcessingResult(False, error_message="Failed to create output file")
+            
+            logger.info(f"Video processing completed: {job.output_path}")
+            return ProcessingResult(True, output_path=job.output_path)
+            
         except Exception as e:
-            logger.error(f"Error processing video job {job.id}: {e}")
-            return ProcessingResult(False, error_message=str(e))
+            logger.error(f"Error processing video {job.main_video.path}: {e}")
+            return ProcessingResult.failure(str(e))
 
     def get_video_info(self, video_path: Path) -> Optional[VideoInfo]:
         """
@@ -246,7 +230,7 @@ class FFmpegService(IVideoProcessor):
             logger.error(f"Error cancelling job {job_id}: {e}")
             return False
 
-    def _build_processing_command(self, job: ProcessingJob) -> List[str]:
+    def _build_processing_command(self, job: ProcessingJob, temp_output: Path) -> List[str]:
         """Build FFmpeg command for processing job"""
         cmd = ["ffmpeg", "-y"]  # -y to overwrite output files
 
@@ -255,50 +239,272 @@ class FFmpegService(IVideoProcessor):
         if job.background_video:
             cmd.extend(["-i", str(job.background_video.path)])
 
+        # Add GIF inputs for GIF overlay effects
+        from ...domain.value_objects.effect_type import EffectType
+        gif_inputs = []
+        for effect in job.effects:
+            if effect.type == EffectType.GIF_OVERLAY:
+                gif_path = effect.get_parameter('gif_path')
+                if gif_path:
+                    # Try to get or create tiled GIF
+                    tiled_gif_path = self._get_or_create_tiled_gif(Path(gif_path))
+                    if tiled_gif_path:
+                        cmd.extend(["-i", str(tiled_gif_path)])
+                        gif_inputs.append(str(tiled_gif_path))
+                        logger.info(f"Using tiled GIF: {tiled_gif_path}")
+                    else:
+                        # Fallback to original GIF
+                        cmd.extend(["-i", str(gif_path)])
+                        gif_inputs.append(gif_path)
+                        logger.warning(f"Using original GIF (tiled creation failed): {gif_path}")
+
         # Build filter complex for video processing
         filter_parts = []
 
-        # Scale main video to half width
-        filter_parts.append(f"[0:v]scale={self.video_config.half_width}:{self.video_config.output_height}[main]")
+        # Scale main video to half width (like old logic)
+        filter_parts.append(f"[0:v]scale={self.video_config.half_width}:{self.video_config.output_height}[left]")
 
+        # Scale background video to half width (like old logic)
         if job.background_video:
-            # Scale background video to half width
-            filter_parts.append(f"[1:v]scale={self.video_config.half_width}:{self.video_config.output_height}[bg]")
-            # Horizontal stack
-            filter_parts.append("[main][bg]hstack=inputs=2[video]")
-            video_label = "[video]"
+            filter_parts.append(f"[1:v]scale={self.video_config.half_width}:{self.video_config.output_height}[right]")
+            # Horizontal stack like old logic
+            filter_parts.append("[left][right]hstack=inputs=2[stacked]")
+            video_label = "[stacked]"
         else:
-            video_label = "[main]"
+            video_label = "[left]"
 
         # Apply effects if any
         if job.effects:
+            gif_input_index = 2 if job.background_video else 1  # Start after main video (0) and background video (1)
             for i, effect in enumerate(job.effects):
-                effect_filter = self._build_effect_filter(effect, video_label, f"[effect{i}]")
-                if effect_filter:
-                    filter_parts.append(effect_filter)
-                    video_label = f"[effect{i}]"
+                if effect.type == EffectType.GIF_OVERLAY:
+                    # Handle GIF overlay effect
+                    effect_filter = self._build_gif_overlay_filter(effect, video_label, f"[effect{i}]", gif_input_index)
+                    if effect_filter:
+                        filter_parts.append(effect_filter)
+                        video_label = f"[effect{i}]"
+                        gif_input_index += 1
+                else:
+                    # Handle other effects
+                    effect_filter = self._build_effect_filter(effect, video_label, f"[effect{i}]")
+                    if effect_filter:
+                        # Skip circle effects for now to avoid syntax errors
+                        if effect.type not in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                                             EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
+                            filter_parts.append(effect_filter)
+                            video_label = f"[effect{i}]"
+                        else:
+                            logger.warning(f"Skipping circle effect {effect.type} to avoid syntax errors")
 
         # Combine all filters
         if filter_parts:
             cmd.extend(["-filter_complex", ";".join(filter_parts)])
-            cmd.extend(["-map", video_label.strip("[]")])
+            # Map the final output
+            cmd.extend(["-map", video_label if 'video_label' in locals() else "[left]"])
+        else:
+            # No effects, just map the main video
+            cmd.extend(["-map", "0:v"])
 
         # Audio mapping (from main video)
         cmd.extend(["-map", "0:a"])
 
-        # Encoding settings
+        # Encoding settings - optimized for performance and safety
         cmd.extend([
             "-c:v", self.ffmpeg_config.codec_video,
-            "-preset", self.ffmpeg_config.preset,
-            "-crf", str(self.video_config.crf_value),
+            "-preset", "ultrafast",  # Use ultrafast for better performance
+            "-crf", "28",  # Slightly higher CRF for faster encoding
             "-c:a", self.ffmpeg_config.codec_audio,
-            "-threads", self.ffmpeg_config.threads
+            "-threads", "0",  # Use all available threads
+            "-shortest",  # Stop when shortest input ends (like old logic)
+            "-movflags", "+faststart+write_colr"  # Optimize for streaming and add color info
         ])
 
         # Output file
-        cmd.append(str(job.output_path))
+        cmd.append(str(temp_output))
 
         return cmd
+
+    def _has_opening_effects(self, job: ProcessingJob) -> bool:
+        """Check if job has opening effects (non-GIF effects)"""
+        from ...domain.value_objects.effect_type import EffectType
+        for effect in job.effects:
+            if effect.type != EffectType.GIF_OVERLAY:
+                return True
+        return False
+
+    def _apply_opening_effects(self, input_video: Path, output_video: Path, job: ProcessingJob) -> bool:
+        """Apply opening effects to video (like old logic)"""
+        try:
+            from ...domain.value_objects.effect_type import EffectType
+            
+            # Find opening effects (non-GIF effects)
+            opening_effects = [effect for effect in job.effects if effect.type != EffectType.GIF_OVERLAY]
+            
+            if not opening_effects:
+                # No opening effects, just copy
+                return self._copy_video(input_video, output_video)
+            
+            # Apply first opening effect (like old logic)
+            effect = opening_effects[0]
+            
+            if effect.type == EffectType.FADE_IN:
+                return self._apply_fade_effect(input_video, output_video, effect.duration)
+            elif effect.type in [EffectType.SLIDE_RIGHT_TO_LEFT, EffectType.SLIDE_LEFT_TO_RIGHT, 
+                               EffectType.SLIDE_TOP_TO_BOTTOM, EffectType.SLIDE_BOTTOM_TO_TOP]:
+                return self._apply_slide_effect(input_video, output_video, effect.type, effect.duration)
+            elif effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT]:
+                return self._apply_circle_effect(input_video, output_video, effect.type, effect.duration)
+            elif effect.type in [EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
+                return self._apply_circle_rotate_effect(input_video, output_video, effect.type, effect.duration)
+            else:
+                logger.warning(f"Unsupported opening effect: {effect.type}")
+                return self._copy_video(input_video, output_video)
+                
+        except Exception as e:
+            logger.error(f"Error applying opening effects: {e}")
+            return False
+
+    def _copy_video(self, input_video: Path, output_video: Path) -> bool:
+        """Copy video without re-encoding"""
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(input_video),
+                "-c", "copy",
+                str(output_video)
+            ]
+            return self._run_ffmpeg_command(cmd, "copy_video")
+        except Exception as e:
+            logger.error(f"Error copying video: {e}")
+            return False
+
+    def _apply_fade_effect(self, input_video: Path, output_video: Path, duration: float) -> bool:
+        """Apply fade in effect"""
+        try:
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(input_video),
+                "-vf", f"fade=t=in:st=0:d={duration}",
+                "-c:a", "copy",
+                str(output_video)
+            ]
+            return self._run_ffmpeg_command(cmd, "fade_effect")
+        except Exception as e:
+            logger.error(f"Error applying fade effect: {e}")
+            return False
+
+    def _apply_slide_effect(self, input_video: Path, output_video: Path, effect_type, duration: float) -> bool:
+        """Apply slide effect"""
+        try:
+            from ...domain.value_objects.effect_type import EffectType
+            
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            
+            if effect_type == EffectType.SLIDE_RIGHT_TO_LEFT:
+                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{duration}),{width}*(1-t/{duration}),0)':y=0"
+            elif effect_type == EffectType.SLIDE_LEFT_TO_RIGHT:
+                crop_filter = f"crop=w={width}:h={height}:x='if(lt(t,{duration}),{width}*(t/{duration}-1),0)':y=0"
+            elif effect_type == EffectType.SLIDE_TOP_TO_BOTTOM:
+                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{duration}),{height}*(t/{duration}-1),0)'"
+            elif effect_type == EffectType.SLIDE_BOTTOM_TO_TOP:
+                crop_filter = f"crop=w={width}:h={height}:x=0:y='if(lt(t,{duration}),{height}*(1-t/{duration}),0)'"
+            else:
+                return self._copy_video(input_video, output_video)
+            
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(input_video),
+                "-vf", crop_filter,
+                "-c:a", "copy",
+                str(output_video)
+            ]
+            return self._run_ffmpeg_command(cmd, "slide_effect")
+        except Exception as e:
+            logger.error(f"Error applying slide effect: {e}")
+            return False
+
+    def _apply_circle_effect(self, input_video: Path, output_video: Path, effect_type, duration: float) -> bool:
+        """Apply circle effect using dedicated processor"""
+        try:
+            from ...domain.value_objects.effect_type import EffectType
+            from ...domain.entities.video import Video
+            from ...domain.entities.effect import Effect
+            from ...infrastructure.processors.circle_effect_processor import CircleEffectProcessor
+            
+            # Get video duration and dimensions
+            video_duration = self._get_video_duration(input_video) or 10.0
+            dims = self._get_video_dimensions(input_video) or (1920, 1080)
+            
+            # Convert tuple to Dimensions object if needed
+            from ...domain.value_objects.dimensions import Dimensions
+            if isinstance(dims, tuple):
+                video_dimensions = Dimensions(*dims)
+            else:
+                video_dimensions = dims
+            
+            # Create video entity
+            video = Video(
+                path=input_video,
+                duration=video_duration,
+                dimensions=video_dimensions
+            )
+            
+            # Create effect entity
+            effect = Effect(
+                type=effect_type,
+                duration=duration
+            )
+            
+            # Use dedicated circle effect processor
+            processor = CircleEffectProcessor(self.ffmpeg_config)
+            result = processor.apply_effect(video, effect, output_video)
+            
+            return result.success
+        except Exception as e:
+            logger.error(f"Error applying circle effect: {e}")
+            return False
+
+    def _apply_circle_rotate_effect(self, input_video: Path, output_video: Path, effect_type, duration: float) -> bool:
+        """Apply circle rotate effect using dedicated processor"""
+        try:
+            from ...domain.value_objects.effect_type import EffectType
+            from ...domain.entities.video import Video
+            from ...domain.entities.effect import Effect
+            from ...infrastructure.processors.circle_effect_processor import CircleEffectProcessor
+            
+            # Get video duration and dimensions
+            video_duration = self._get_video_duration(input_video) or 10.0
+            dims = self._get_video_dimensions(input_video) or (1920, 1080)
+            
+            # Convert tuple to Dimensions object if needed
+            from ...domain.value_objects.dimensions import Dimensions
+            if isinstance(dims, tuple):
+                video_dimensions = Dimensions(*dims)
+            else:
+                video_dimensions = dims
+            
+            # Create video entity
+            video = Video(
+                path=input_video,
+                duration=video_duration,
+                dimensions=video_dimensions
+            )
+            
+            # Create effect entity
+            effect = Effect(
+                type=effect_type,
+                duration=duration
+            )
+            
+            # Use dedicated circle effect processor
+            processor = CircleEffectProcessor(self.ffmpeg_config)
+            result = processor.apply_effect(video, effect, output_video)
+            
+            return result.success
+        except Exception as e:
+            logger.error(f"Error applying circle rotate effect: {e}")
+            return False
 
     def _build_effect_filter(self, effect, input_label: str, output_label: str) -> Optional[str]:
         """Build FFmpeg filter for a specific effect"""
@@ -307,46 +513,183 @@ class FFmpegService(IVideoProcessor):
         if effect.type == EffectType.FADE_IN:
             return f"{input_label}fade=t=in:st=0:d={effect.duration}{output_label}"
         elif effect.type == EffectType.SLIDE_RIGHT_TO_LEFT:
-            return f"{input_label}slide=direction=right:duration={effect.duration}{output_label}"
+            # Implement slide effect using crop and overlay
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            # Create a sliding effect by cropping and moving the video
+            return f"{input_label}crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(1-t/{effect.duration}),0)':y=0{output_label}"
+        elif effect.type == EffectType.SLIDE_LEFT_TO_RIGHT:
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            return f"{input_label}crop=w={width}:h={height}:x='if(lt(t,{effect.duration}),{width}*(t/{effect.duration}-1),0)':y=0{output_label}"
+        elif effect.type == EffectType.SLIDE_TOP_TO_BOTTOM:
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            return f"{input_label}crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(t/{effect.duration}-1),0)'{output_label}"
+        elif effect.type == EffectType.SLIDE_BOTTOM_TO_TOP:
+            width = self.video_config.output_width
+            height = self.video_config.output_height
+            return f"{input_label}crop=w={width}:h={height}:x=0:y='if(lt(t,{effect.duration}),{height}*(1-t/{effect.duration}),0)'{output_label}"
+        elif effect.type in [EffectType.CIRCLE_EXPAND, EffectType.CIRCLE_CONTRACT, 
+                           EffectType.CIRCLE_ROTATE_CW, EffectType.CIRCLE_ROTATE_CCW]:
+            # Circle effects are now handled by dedicated processor in _apply_opening_effects
+            # Return None to skip in first pass
+            return None
+        elif effect.type == EffectType.GIF_OVERLAY:
+            # GIF overlay effect - this will be handled differently in the main command building
+            # For now, return None as GIF overlays require additional input streams
+            return None
         # Add more effect filters as needed
 
         return None
 
-    def _run_ffmpeg_command(self, cmd: List[str], job_id: str) -> bool:
-        """Execute FFmpeg command with error handling"""
-        try:
-            logger.info(f"Running FFmpeg command for job {job_id}: {' '.join(cmd[:5])}...")
+    def _build_gif_overlay_filter(self, effect, input_label: str, output_label: str, gif_input_index: int) -> Optional[str]:
+        """Build FFmpeg filter for GIF overlay effect"""
+        from ...domain.value_objects.effect_type import EffectType
 
-            process = subprocess.Popen(
+        if effect.type == EffectType.GIF_OVERLAY:
+            # Get parameters
+            x_pos = effect.get_parameter('x', 10)  # Default to 10 pixels from left
+            y_pos = effect.get_parameter('y', 10)  # Default to 10 pixels from top
+            scale = effect.get_parameter('scale', 1.0)  # Default scale
+
+            # Build overlay filter - use simple overlay like old logic
+            # input_label is the video stream, [gif_input_index:v] is the GIF stream
+            gif_stream = f"[{gif_input_index}:v]"
+            
+            # Scale the GIF if needed (no loop, let FFmpeg handle it naturally)
+            if scale != 1.0:
+                scale_filter = f"{gif_stream}scale=iw*{scale}:ih*{scale}[gif_scaled]"
+                overlay_filter = f"{input_label}[gif_scaled]overlay={x_pos}:{y_pos}{output_label}"
+                return f"{scale_filter};{overlay_filter}"
+            else:
+                return f"{input_label}{gif_stream}overlay={x_pos}:{y_pos}{output_label}"
+
+        return None
+
+    def _get_or_create_tiled_gif(self, gif_path: Path) -> Optional[Path]:
+        """Get existing tiled GIF or create new one"""
+        try:
+            from ...domain.value_objects.dimensions import Dimensions
+            from ...infrastructure.processors.gif_processor import GIFProcessor
+            from ...shared.config import PathConfig
+            
+            # Create a temporary path config for GIF processor
+            path_config = PathConfig(
+                effects_dir=Path("effects"),
+                generated_effects_dir=Path("generated_effects"),
+                output_dir=Path("output"),
+                temp_dir=Path("temp")
+            )
+            
+            gif_processor = GIFProcessor(path_config)
+            tiled_gif_path = gif_processor.get_or_create_tiled_gif(
+                video_path=Path("temp"),  # Dummy path
+                original_gif_path=gif_path
+            )
+            
+            return tiled_gif_path
+            
+        except Exception as e:
+            logger.warning(f"Failed to create tiled GIF for {gif_path}: {e}")
+            return None
+
+    def _validate_output_file(self, output_path: Path) -> bool:
+        """Validate that output file is complete and playable"""
+        try:
+            if not output_path.exists():
+                logger.error(f"Output file does not exist: {output_path}")
+                return False
+
+            # Check file size (should be > 1MB for a valid video)
+            if output_path.stat().st_size < 1024 * 1024:
+                logger.error(f"Output file too small: {output_path.stat().st_size} bytes")
+                return False
+
+            # Validate with ffprobe
+            cmd = [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=codec_type", "-of", "csv=p=0",
+                str(output_path)
+            ]
+
+            result = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                timeout=10
             )
 
-            # Store process for potential cancellation
-            self._active_processes[job_id] = process
-
-            # Wait for completion
-            stdout, stderr = process.communicate()
-
-            # Remove from active processes
-            if job_id in self._active_processes:
-                del self._active_processes[job_id]
-
-            if process.returncode == 0:
-                logger.info(f"FFmpeg command completed successfully for job {job_id}")
+            if result.returncode == 0 and "video" in result.stdout:
+                logger.info(f"Output file validation passed: {output_path}")
                 return True
             else:
-                logger.error(f"FFmpeg command failed for job {job_id}: {stderr}")
-                raise FFmpegException(' '.join(cmd), stderr, process.returncode)
+                logger.error(f"Output file validation failed: {result.stderr}")
+                return False
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"FFmpeg command timed out for job {job_id}")
-            return False
         except Exception as e:
-            logger.error(f"Error running FFmpeg command for job {job_id}: {e}")
+            logger.error(f"Error validating output file {output_path}: {e}")
             return False
+
+    def _run_ffmpeg_command(self, cmd: List[str], job_id: str) -> bool:
+        """Execute FFmpeg command with error handling"""
+        # Acquire semaphore to limit concurrent processes
+        with self._ffmpeg_semaphore:
+            try:
+                logger.info(f"Running FFmpeg command for job {job_id}: {' '.join(cmd[:5])}...")
+                logger.debug(f"Full FFmpeg command: {' '.join(cmd)}")
+
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+
+                # Store process for potential cancellation
+                self._active_processes[job_id] = process
+
+                # Wait for completion with timeout (5 minutes)
+                try:
+                    stdout, stderr = process.communicate(timeout=300)
+                except subprocess.TimeoutExpired:
+                    logger.error(f"FFmpeg command timed out for job {job_id}")
+                    process.kill()
+                    process.wait()
+                    if job_id in self._active_processes:
+                        del self._active_processes[job_id]
+                    return False
+
+                # Remove from active processes
+                if job_id in self._active_processes:
+                    del self._active_processes[job_id]
+
+                if process.returncode == 0:
+                    logger.info(f"FFmpeg command completed successfully for job {job_id}")
+                    
+                    # Validate output file
+                    output_path = cmd[-1]  # Last argument is output file
+                    if self._validate_output_file(Path(output_path)):
+                        return True
+                    else:
+                        logger.error(f"Output file validation failed for job {job_id}")
+                        return False
+                else:
+                    logger.error(f"FFmpeg command failed for job {job_id}: {stderr}")
+                    raise FFmpegException(' '.join(cmd), stderr, process.returncode)
+
+            except Exception as e:
+                logger.error(f"Error running FFmpeg command for job {job_id}: {e}")
+                # Clean up process if it's still running
+                if job_id in self._active_processes:
+                    try:
+                        self._active_processes[job_id].kill()
+                        self._active_processes[job_id].wait()
+                    except:
+                        pass
+                    del self._active_processes[job_id]
+                return False
 
     @lru_cache(maxsize=128)
     def _get_video_duration(self, video_path: Path) -> Optional[float]:

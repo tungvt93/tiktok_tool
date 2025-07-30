@@ -329,8 +329,16 @@ class ProcessingService:
             job.update_status(JobStatus.PROCESSING)
             self._notify_status_change(job.id, JobStatus.PROCESSING)
 
-            # Process video
-            result = self.video_processor.process_video(job)
+            # Process video with timeout
+            try:
+                result = self.video_processor.process_video(job)
+            except Exception as e:
+                logger.error(f"Video processing failed for job {job.id}: {e}")
+                job.update_status(JobStatus.FAILED, str(e))
+                self._stats['failed_jobs'] += 1
+                self._notify_status_change(job.id, JobStatus.FAILED)
+                self._notify_complete(job.id, False)
+                return
 
             processing_time = time.time() - start_time
 

@@ -8,7 +8,7 @@ from enum import Enum
 
 
 class EffectType(Enum):
-    """Types of opening effects available for video processing"""
+    """Types of effects available for video processing"""
     NONE = "none"
     SLIDE_RIGHT_TO_LEFT = "slide_right_to_left"
     SLIDE_LEFT_TO_RIGHT = "slide_left_to_right"
@@ -19,6 +19,7 @@ class EffectType(Enum):
     CIRCLE_ROTATE_CW = "circle_rotate_cw"
     CIRCLE_ROTATE_CCW = "circle_rotate_ccw"
     FADE_IN = "fade_in"
+    GIF_OVERLAY = "gif_overlay"
 
     @classmethod
     def get_slide_effects(cls) -> list['EffectType']:

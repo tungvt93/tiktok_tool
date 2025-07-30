@@ -166,12 +166,6 @@ class GIFProcessor(IEffectProcessor):
             # Create generated effects directory if it doesn't exist
             self.path_config.generated_effects_dir.mkdir(parents=True, exist_ok=True)
 
-            # Use generated effects directory for new GIFs
-            output_gif_path = (
-                self.path_config.generated_effects_dir /
-                f"star_tiled_{target_size.width}x{target_size.height}.gif"
-            )
-
             # Use default GIF if none provided
             if original_gif_path is None:
                 # Look for default GIF in effects directory
@@ -183,9 +177,24 @@ class GIFProcessor(IEffectProcessor):
                     return None
 
             # Get target size from video or use default
-            target_size = Dimensions(1080, 1080)  # Default size
+            # Use medium size for balance between quality and performance
+            target_size = Dimensions(1080, 1080)  # Medium size for balance
 
+            # Create filename based on original GIF name and target size
+            original_name = original_gif_path.stem
+            output_gif_path = (
+                self.path_config.generated_effects_dir /
+                f"{original_name}_tiled_{target_size.width}x{target_size.height}.gif"
+            )
+
+            # Check if tiled GIF already exists
+            if output_gif_path.exists():
+                logger.info(f"Tiled GIF already exists: {output_gif_path}")
+                return output_gif_path
+
+            # Create new tiled GIF
             if self.create_tiled_gif(original_gif_path, output_gif_path, target_size):
+                logger.info(f"Created tiled GIF: {output_gif_path}")
                 return output_gif_path
             return None
 
